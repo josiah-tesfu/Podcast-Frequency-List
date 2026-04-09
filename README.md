@@ -41,9 +41,13 @@ tests/
 ```bash
 uv run podfreq info
 uv run podfreq init-db
+uv run podfreq add-show "https://example.com/feed.xml"
+uv run podfreq sync-feed --show-id 1
+uv run podfreq discover-show "InnerFrench" --select 1
 ```
 
 ## Notes
 
 - `.env` is not auto-loaded by Python. Load it in the shell before running commands.
 - Raw artifacts and local DB files stay out of git.
+- Current discovery work uses direct feed URLs. Podcast Index remains as a fallback path.
