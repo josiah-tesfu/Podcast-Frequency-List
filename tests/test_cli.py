@@ -29,9 +29,15 @@ def test_init_db_creates_database(tmp_path, monkeypatch) -> None:
 
     with sqlite3.connect(db_path) as connection:
         rows = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_meta'"
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table'
+            AND name IN ('app_meta', 'shows', 'episodes')
+            ORDER BY name
+            """
         ).fetchall()
 
-    assert rows == [("app_meta",)]
+    assert rows == [("app_meta",), ("episodes",), ("shows",)]
 
     load_settings.cache_clear()

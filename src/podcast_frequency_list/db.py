@@ -5,6 +5,16 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
+SCHEMA_VERSION = "1"
+
+
+def get_schema_path() -> Path:
+    return Path(__file__).with_name("schema.sql")
+
+
+def load_schema() -> str:
+    return get_schema_path().read_text(encoding="utf-8")
+
 
 def connect(db_path: Path | None = None) -> sqlite3.Connection:
     settings = load_settings()
@@ -24,13 +34,14 @@ def bootstrap_database(db_path: Path | None = None) -> Path:
 
     connection = connect(target_path)
     try:
+        connection.executescript(load_schema())
         connection.execute(
             """
-            CREATE TABLE IF NOT EXISTS app_meta (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-            """
+            INSERT INTO app_meta (key, value)
+            VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+            """,
+            ("schema_version", SCHEMA_VERSION),
         )
         connection.commit()
     finally:
