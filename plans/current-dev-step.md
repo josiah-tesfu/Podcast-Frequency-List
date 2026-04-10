@@ -1,5 +1,5 @@
-Current step: 10h Zack ASR pilot scaffold.
+Current step: Zack ASR smoke test.
 
 Notes:
-- No ASR calls yet.
-- Output: reproducible pilot selection + cost estimate.
+- Pilot: zack-10h-pilot.
+- Command: run-asr --pilot zack-10h-pilot --limit 1.

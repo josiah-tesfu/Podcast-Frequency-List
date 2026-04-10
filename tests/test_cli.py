@@ -2,6 +2,7 @@ import sqlite3
 
 from typer.testing import CliRunner
 
+from podcast_frequency_list.asr.models import AsrEpisodeResult, AsrRunResult
 from podcast_frequency_list.cli import app
 from podcast_frequency_list.config import load_settings
 from podcast_frequency_list.discovery.models import PodcastCandidate, SavedShow
@@ -133,6 +134,49 @@ class FakePilotSelectionService:
         )
 
 
+class FakeAsrRunService:
+    def __init__(self) -> None:
+        self.pilot_name: str | None = None
+        self.limit: int | None = None
+        self.force: bool | None = None
+
+    def run_pilot(
+        self,
+        *,
+        pilot_name: str,
+        limit: int | None = None,
+        force: bool = False,
+    ) -> AsrRunResult:
+        self.pilot_name = pilot_name
+        self.limit = limit
+        self.force = force
+        return AsrRunResult(
+            pilot_name=pilot_name,
+            model="gpt-4o-mini-transcribe",
+            requested_limit=limit,
+            selected_count=1,
+            completed_count=1,
+            skipped_count=0,
+            failed_count=0,
+            chunk_count=2,
+            episode_results=(
+                AsrEpisodeResult(
+                    episode_id=1,
+                    title="Episode 1",
+                    status="ready",
+                    audio_path=None,
+                    transcript_path=None,
+                    chunk_count=2,
+                    text_chars=42,
+                    preview="bonjour tout le monde",
+                ),
+            ),
+        )
+
+    def close(self) -> None:
+        return None
+
+
 def test_cli_help() -> None:
     result = runner.invoke(app, ["--help"])
 
@@ -226,6 +270,19 @@ def test_sync_feed_prints_stats(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
     load_settings.cache_clear()
 
+    fake_service = FakeSyncFeedService()
+    monkeypatch.setattr("podcast_frequency_list.cli.build_sync_feed_service", lambda: fake_service)
+
+    result = runner.invoke(app, ["sync-feed", "--show-id", "1", "--limit", "10"])
+
+    assert result.exit_code == 0
+    assert "show_id=1" in result.stdout
+    assert "episodes_inserted=8" in result.stdout
+    assert fake_service.show_id == 1
+    assert fake_service.limit == 10
+
+    load_settings.cache_clear()
+
 
 def test_create_pilot_prints_stats(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
@@ -264,15 +321,34 @@ def test_create_pilot_prints_stats(tmp_path, monkeypatch) -> None:
 
     load_settings.cache_clear()
 
-    fake_service = FakeSyncFeedService()
-    monkeypatch.setattr("podcast_frequency_list.cli.build_sync_feed_service", lambda: fake_service)
 
-    result = runner.invoke(app, ["sync-feed", "--show-id", "1", "--limit", "10"])
+def test_run_asr_prints_smoke_test_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeAsrRunService()
+    monkeypatch.setattr("podcast_frequency_list.cli.build_asr_run_service", lambda: fake_service)
+
+    result = runner.invoke(
+        app,
+        [
+            "run-asr",
+            "--pilot",
+            "zack-10h-pilot",
+            "--limit",
+            "1",
+        ],
+    )
 
     assert result.exit_code == 0
-    assert "show_id=1" in result.stdout
-    assert "episodes_inserted=8" in result.stdout
-    assert fake_service.show_id == 1
-    assert fake_service.limit == 10
+    assert "pilot=zack-10h-pilot" in result.stdout
+    assert "completed_episodes=1" in result.stdout
+    assert "chunks_transcribed=2" in result.stdout
+    assert "preview=bonjour tout le monde" in result.stdout
+    assert fake_service.pilot_name == "zack-10h-pilot"
+    assert fake_service.limit == 1
+    assert fake_service.force is False
 
     load_settings.cache_clear()

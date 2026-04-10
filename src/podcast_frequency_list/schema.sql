@@ -83,3 +83,22 @@ CREATE INDEX IF NOT EXISTS idx_transcript_sources_episode_id
     ON transcript_sources (episode_id);
 CREATE INDEX IF NOT EXISTS idx_transcript_sources_status
     ON transcript_sources (status);
+
+CREATE TABLE IF NOT EXISTS transcript_segments (
+    segment_id INTEGER PRIMARY KEY,
+    source_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    start_ms INTEGER,
+    end_ms INTEGER,
+    speaker TEXT,
+    raw_text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (source_id) REFERENCES transcript_sources(source_id) ON DELETE CASCADE,
+    FOREIGN KEY (episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE,
+    UNIQUE (source_id, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transcript_segments_episode_id
+    ON transcript_segments (episode_id);

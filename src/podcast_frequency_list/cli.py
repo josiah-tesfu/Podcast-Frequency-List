@@ -2,6 +2,15 @@ from __future__ import annotations
 
 import typer
 
+from podcast_frequency_list.asr import (
+    AsrRunError,
+    AsrRunService,
+    AudioChunker,
+    AudioDownloader,
+    OpenAITranscriber,
+)
+from podcast_frequency_list.asr.audio import DEFAULT_SAFE_UPLOAD_BYTES
+from podcast_frequency_list.asr.client import OpenAITranscriptionError
 from podcast_frequency_list.config import load_settings
 from podcast_frequency_list.db import bootstrap_database
 from podcast_frequency_list.discovery import (
@@ -63,6 +72,24 @@ def build_sync_feed_service() -> SyncFeedService:
 def build_pilot_selection_service() -> PilotSelectionService:
     settings = load_settings()
     return PilotSelectionService(db_path=settings.db_path)
+
+
+def build_asr_run_service() -> AsrRunService:
+    settings = load_settings()
+    transcriber = OpenAITranscriber(
+        api_key=settings.openai_api_key,
+        model=settings.asr_model,
+    )
+    return AsrRunService(
+        db_path=settings.db_path,
+        raw_data_dir=settings.raw_data_dir,
+        audio_downloader=AudioDownloader(audio_dir=settings.raw_data_dir / "audio"),
+        audio_chunker=AudioChunker(
+            chunk_dir=settings.raw_data_dir / "audio_chunks",
+            max_upload_bytes=DEFAULT_SAFE_UPLOAD_BYTES,
+        ),
+        transcriber=transcriber,
+    )
 
 
 def echo_candidate(index: int, candidate: PodcastCandidate) -> None:
@@ -179,6 +206,50 @@ def create_pilot(
     except PilotSelectionError as exc:
         typer.echo(f"error={exc}")
         raise typer.Exit(code=1) from exc
+
+
+@app.command("run-asr")
+def run_asr(
+    pilot: str = typer.Option(..., "--pilot"),
+    limit: int | None = typer.Option(None, "--limit", min=1),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    bootstrap_database()
+
+    try:
+        service = build_asr_run_service()
+    except OpenAITranscriptionError as exc:
+        typer.echo(f"error={exc}")
+        raise typer.Exit(code=1) from exc
+
+    try:
+        result = service.run_pilot(pilot_name=pilot, limit=limit, force=force)
+        typer.echo(f"pilot={result.pilot_name}")
+        typer.echo(f"model={result.model}")
+        typer.echo(f"requested_limit={result.requested_limit or '-'}")
+        typer.echo(f"selected_episodes={result.selected_count}")
+        typer.echo(f"completed_episodes={result.completed_count}")
+        typer.echo(f"skipped_episodes={result.skipped_count}")
+        typer.echo(f"failed_episodes={result.failed_count}")
+        typer.echo(f"chunks_transcribed={result.chunk_count}")
+        for episode_result in result.episode_results:
+            typer.echo(
+                f"episode_id={episode_result.episode_id} status={episode_result.status} "
+                f"chunks={episode_result.chunk_count} chars={episode_result.text_chars}"
+            )
+            if episode_result.transcript_path:
+                typer.echo(f"transcript_path={episode_result.transcript_path}")
+            if episode_result.preview:
+                typer.echo(f"preview={episode_result.preview}")
+            if episode_result.error:
+                typer.echo(f"error={episode_result.error}")
+        if result.failed_count:
+            raise typer.Exit(code=1)
+    except AsrRunError as exc:
+        typer.echo(f"error={exc}")
+        raise typer.Exit(code=1) from exc
+    finally:
+        service.close()
 
 
 @app.command("discover-show")
