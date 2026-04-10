@@ -1,5 +1,5 @@
-Current step: Zack ASR smoke test.
+Current step: transcript normalization.
 
 Notes:
-- Pilot: zack-10h-pilot.
-- Command: run-asr --pilot zack-10h-pilot --limit 1.
+- Keep raw transcript text immutable.
+- Normalize by pilot or by episode.

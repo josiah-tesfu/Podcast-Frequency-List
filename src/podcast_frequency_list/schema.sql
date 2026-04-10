@@ -102,3 +102,18 @@ CREATE TABLE IF NOT EXISTS transcript_segments (
 
 CREATE INDEX IF NOT EXISTS idx_transcript_segments_episode_id
     ON transcript_segments (episode_id);
+
+CREATE TABLE IF NOT EXISTS normalized_segments (
+    normalized_segment_id INTEGER PRIMARY KEY,
+    segment_id INTEGER NOT NULL UNIQUE,
+    episode_id INTEGER NOT NULL,
+    normalization_version TEXT NOT NULL,
+    normalized_text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (segment_id) REFERENCES transcript_segments(segment_id) ON DELETE CASCADE,
+    FOREIGN KEY (episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_normalized_segments_episode_id
+    ON normalized_segments (episode_id);

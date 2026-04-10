@@ -15,6 +15,7 @@ Current command list:
 - `sync-feed`
 - `create-pilot`
 - `run-asr`
+- `normalize-transcripts`
 - `discover-show`
 
 ## Core Workflow
@@ -25,6 +26,7 @@ Normal flow:
 3. create a pilot subset
 4. run ASR on a small smoke test
 5. run ASR on the rest of the pilot
+6. normalize transcript text for downstream processing
 
 Example:
 
@@ -34,6 +36,7 @@ uv run podfreq sync-feed --show-id 1
 uv run podfreq create-pilot --show-id 1 --name zack-10h-pilot --hours 10
 uv run podfreq run-asr --pilot zack-10h-pilot --limit 1
 uv run podfreq run-asr --pilot zack-10h-pilot --limit 5
+uv run podfreq normalize-transcripts --pilot zack-10h-pilot
 ```
 
 ## Command Reference
@@ -280,6 +283,42 @@ Important:
 - this is fallback path right now
 - current working path is manual `add-show`
 - requires Podcast Index credentials if actually used
+
+### `normalize-transcripts`
+
+What it does:
+- reads ready transcript chunks from `transcript_segments`
+- writes deterministic normalized text into `normalized_segments`
+- keeps raw ASR chunk text untouched
+
+Commands:
+
+```bash
+uv run podfreq normalize-transcripts --pilot zack-10h-pilot
+uv run podfreq normalize-transcripts --episode-id 1
+uv run podfreq normalize-transcripts --pilot zack-10h-pilot --force
+```
+
+Inputs:
+- `--pilot`: normalize all transcript chunks in one pilot
+- `--episode-id`: normalize one episode directly
+- `--force`: rerun even if the current normalization version already exists
+
+Rules:
+- exactly one of `--pilot` or `--episode-id`
+- only transcript sources with `status=ready` are used
+- reruns skip current-version rows unless `--force` is set
+
+Output:
+- scope
+- normalization version
+- selected/normalized/skipped segment counts
+- episodes touched
+
+DB effects:
+- source rows stay unchanged
+- raw chunk text stays in `transcript_segments`
+- derived normalized text goes to `normalized_segments`
 
 ## Common Permutations
 

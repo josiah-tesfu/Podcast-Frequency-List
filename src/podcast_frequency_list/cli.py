@@ -29,6 +29,10 @@ from podcast_frequency_list.ingest import (
     SyncFeedError,
     SyncFeedService,
 )
+from podcast_frequency_list.normalize import (
+    TranscriptNormalizationError,
+    TranscriptNormalizationService,
+)
 from podcast_frequency_list.pilot import PilotSelectionError, PilotSelectionService
 
 app = typer.Typer(
@@ -90,6 +94,11 @@ def build_asr_run_service() -> AsrRunService:
         ),
         transcriber=transcriber,
     )
+
+
+def build_transcript_normalization_service() -> TranscriptNormalizationService:
+    settings = load_settings()
+    return TranscriptNormalizationService(db_path=settings.db_path)
 
 
 def echo_candidate(index: int, candidate: PodcastCandidate) -> None:
@@ -250,6 +259,33 @@ def run_asr(
         raise typer.Exit(code=1) from exc
     finally:
         service.close()
+
+
+@app.command("normalize-transcripts")
+def normalize_transcripts(
+    pilot: str | None = typer.Option(None, "--pilot"),
+    episode_id: int | None = typer.Option(None, "--episode-id", min=1),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    bootstrap_database()
+    service = build_transcript_normalization_service()
+
+    try:
+        result = service.normalize(
+            pilot_name=pilot,
+            episode_id=episode_id,
+            force=force,
+        )
+        typer.echo(f"scope={result.scope}")
+        typer.echo(f"scope_value={result.scope_value}")
+        typer.echo(f"normalization_version={result.normalization_version}")
+        typer.echo(f"selected_segments={result.selected_segments}")
+        typer.echo(f"normalized_segments={result.normalized_segments}")
+        typer.echo(f"skipped_segments={result.skipped_segments}")
+        typer.echo(f"episodes_touched={result.episode_count}")
+    except TranscriptNormalizationError as exc:
+        typer.echo(f"error={exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("discover-show")

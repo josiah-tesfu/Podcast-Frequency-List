@@ -7,6 +7,7 @@ from podcast_frequency_list.cli import app
 from podcast_frequency_list.config import load_settings
 from podcast_frequency_list.discovery.models import PodcastCandidate, SavedShow
 from podcast_frequency_list.ingest.models import SyncFeedResult
+from podcast_frequency_list.normalize.models import NormalizationRunResult
 from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResult
 
 runner = CliRunner()
@@ -175,6 +176,33 @@ class FakeAsrRunService:
 
     def close(self) -> None:
         return None
+
+
+class FakeTranscriptNormalizationService:
+    def __init__(self) -> None:
+        self.pilot_name: str | None = None
+        self.episode_id: int | None = None
+        self.force: bool | None = None
+
+    def normalize(
+        self,
+        *,
+        pilot_name: str | None = None,
+        episode_id: int | None = None,
+        force: bool = False,
+    ) -> NormalizationRunResult:
+        self.pilot_name = pilot_name
+        self.episode_id = episode_id
+        self.force = force
+        return NormalizationRunResult(
+            scope="pilot",
+            scope_value=pilot_name or "",
+            normalization_version="1",
+            selected_segments=6,
+            normalized_segments=6,
+            skipped_segments=0,
+            episode_count=2,
+        )
 
 
 def test_cli_help() -> None:
@@ -349,6 +377,38 @@ def test_run_asr_prints_smoke_test_stats(tmp_path, monkeypatch) -> None:
     assert "preview=bonjour tout le monde" in result.stdout
     assert fake_service.pilot_name == "zack-10h-pilot"
     assert fake_service.limit == 1
+    assert fake_service.force is False
+
+    load_settings.cache_clear()
+
+
+def test_normalize_transcripts_prints_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeTranscriptNormalizationService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_transcript_normalization_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "normalize-transcripts",
+            "--pilot",
+            "zack-10h-pilot",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "scope=pilot" in result.stdout
+    assert "scope_value=zack-10h-pilot" in result.stdout
+    assert "normalized_segments=6" in result.stdout
+    assert fake_service.pilot_name == "zack-10h-pilot"
+    assert fake_service.episode_id is None
     assert fake_service.force is False
 
     load_settings.cache_clear()
