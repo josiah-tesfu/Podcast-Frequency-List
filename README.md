@@ -43,6 +43,7 @@ uv run podfreq info
 uv run podfreq init-db
 uv run podfreq add-show "https://example.com/feed.xml"
 uv run podfreq sync-feed --show-id 1
+uv run podfreq create-pilot --show-id 1 --name zack-10h-pilot --hours 10
 uv run podfreq discover-show "InnerFrench" --select 1
 ```
 

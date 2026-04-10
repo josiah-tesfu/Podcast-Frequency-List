@@ -6,6 +6,7 @@ from podcast_frequency_list.cli import app
 from podcast_frequency_list.config import load_settings
 from podcast_frequency_list.discovery.models import PodcastCandidate, SavedShow
 from podcast_frequency_list.ingest.models import SyncFeedResult
+from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResult
 
 runner = CliRunner()
 
@@ -82,6 +83,54 @@ class FakeSyncFeedService:
 
     def close(self) -> None:
         return None
+
+
+class FakePilotSelectionService:
+    def __init__(self) -> None:
+        self.show_id: int | None = None
+        self.name: str | None = None
+        self.target_seconds: int | None = None
+        self.selection_order: str | None = None
+        self.notes: str | None = None
+
+    def create_pilot(
+        self,
+        *,
+        show_id: int,
+        name: str,
+        target_seconds: int,
+        selection_order: str = "newest",
+        notes: str | None = None,
+    ) -> PilotSelectionResult:
+        self.show_id = show_id
+        self.name = name
+        self.target_seconds = target_seconds
+        self.selection_order = selection_order
+        self.notes = notes
+        return PilotSelectionResult(
+            pilot_run_id=3,
+            name=name,
+            show_id=show_id,
+            show_title="Zack en Roue Libre by Zack Nani",
+            target_seconds=target_seconds,
+            total_seconds=36_600,
+            selected_count=4,
+            skipped_count=1,
+            estimated_cost_usd=1.83,
+            model="gpt-4o-mini-transcribe",
+            selection_order=selection_order,
+            first_published_at="2025-02-01T00:00:00+00:00",
+            last_published_at="2025-01-01T00:00:00+00:00",
+            episodes=(
+                PilotEpisode(
+                    episode_id=1,
+                    title="Episode 1",
+                    published_at="2025-02-01T00:00:00+00:00",
+                    duration_seconds=9_000,
+                    cumulative_seconds=9_000,
+                ),
+            ),
+        )
 
 
 def test_cli_help() -> None:
@@ -175,6 +224,44 @@ def test_sync_feed_prints_stats(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
     monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+
+def test_create_pilot_prints_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakePilotSelectionService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_pilot_selection_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "create-pilot",
+            "--show-id",
+            "1",
+            "--name",
+            "zack-10h-pilot",
+            "--hours",
+            "10",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "pilot_run_id=3" in result.stdout
+    assert "selected_episodes=4" in result.stdout
+    assert "estimated_asr_cost_usd=1.83" in result.stdout
+    assert "status=needs_asr" in result.stdout
+    assert fake_service.show_id == 1
+    assert fake_service.name == "zack-10h-pilot"
+    assert fake_service.target_seconds == 36_000
+    assert fake_service.selection_order == "newest"
+
     load_settings.cache_clear()
 
     fake_service = FakeSyncFeedService()

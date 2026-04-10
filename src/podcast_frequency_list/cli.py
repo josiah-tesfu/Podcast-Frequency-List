@@ -20,6 +20,7 @@ from podcast_frequency_list.ingest import (
     SyncFeedError,
     SyncFeedService,
 )
+from podcast_frequency_list.pilot import PilotSelectionError, PilotSelectionService
 
 app = typer.Typer(
     add_completion=False,
@@ -57,6 +58,11 @@ def build_sync_feed_service() -> SyncFeedService:
         db_path=settings.db_path,
         rss_feed_client=RssFeedClient(user_agent=DEFAULT_USER_AGENT),
     )
+
+
+def build_pilot_selection_service() -> PilotSelectionService:
+    settings = load_settings()
+    return PilotSelectionService(db_path=settings.db_path)
 
 
 def echo_candidate(index: int, candidate: PodcastCandidate) -> None:
@@ -135,6 +141,44 @@ def sync_feed(
         raise typer.Exit(code=1) from exc
     finally:
         service.close()
+
+
+@app.command("create-pilot")
+def create_pilot(
+    show_id: int = typer.Option(..., "--show-id", min=1),
+    name: str = typer.Option(..., "--name"),
+    hours: float = typer.Option(10.0, "--hours", min=0.1),
+    selection_order: str = typer.Option("newest", "--selection-order"),
+    notes: str | None = typer.Option(None, "--notes"),
+) -> None:
+    bootstrap_database()
+    service = build_pilot_selection_service()
+
+    try:
+        result = service.create_pilot(
+            show_id=show_id,
+            name=name,
+            target_seconds=round(hours * 3600),
+            selection_order=selection_order,
+            notes=notes,
+        )
+        typer.echo(f"pilot_run_id={result.pilot_run_id}")
+        typer.echo(f"name={result.name}")
+        typer.echo(f"show_id={result.show_id}")
+        typer.echo(f"title={result.show_title}")
+        typer.echo(f"target_hours={result.target_seconds / 3600:.2f}")
+        typer.echo(f"selected_hours={result.total_seconds / 3600:.2f}")
+        typer.echo(f"selected_episodes={result.selected_count}")
+        typer.echo(f"skipped_ineligible_episodes={result.skipped_count}")
+        typer.echo(f"selection_order={result.selection_order}")
+        typer.echo(f"model={result.model}")
+        typer.echo(f"estimated_asr_cost_usd={result.estimated_cost_usd:.2f}")
+        typer.echo(f"first_selected_published_at={result.first_published_at or '-'}")
+        typer.echo(f"last_selected_published_at={result.last_published_at or '-'}")
+        typer.echo("status=needs_asr")
+    except PilotSelectionError as exc:
+        typer.echo(f"error={exc}")
+        raise typer.Exit(code=1) from exc
 
 
 @app.command("discover-show")

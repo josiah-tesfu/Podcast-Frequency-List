@@ -36,3 +36,50 @@ CREATE TABLE IF NOT EXISTS episodes (
 
 CREATE INDEX IF NOT EXISTS idx_episodes_show_id ON episodes (show_id);
 CREATE INDEX IF NOT EXISTS idx_episodes_published_at ON episodes (published_at);
+
+CREATE TABLE IF NOT EXISTS pilot_runs (
+    pilot_run_id INTEGER PRIMARY KEY,
+    show_id INTEGER NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    target_seconds INTEGER NOT NULL CHECK (target_seconds > 0),
+    selection_order TEXT NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (show_id) REFERENCES shows(show_id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS pilot_run_episodes (
+    pilot_run_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    position INTEGER NOT NULL,
+    cumulative_seconds INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (pilot_run_id, episode_id),
+    FOREIGN KEY (pilot_run_id) REFERENCES pilot_runs(pilot_run_id) ON DELETE CASCADE,
+    FOREIGN KEY (episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE,
+    UNIQUE (pilot_run_id, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pilot_run_episodes_episode_id
+    ON pilot_run_episodes (episode_id);
+
+CREATE TABLE IF NOT EXISTS transcript_sources (
+    source_id INTEGER PRIMARY KEY,
+    episode_id INTEGER NOT NULL,
+    source_type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    model TEXT,
+    source_url TEXT,
+    raw_path TEXT,
+    estimated_cost_usd REAL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE,
+    UNIQUE (episode_id, source_type, model)
+);
+
+CREATE INDEX IF NOT EXISTS idx_transcript_sources_episode_id
+    ON transcript_sources (episode_id);
+CREATE INDEX IF NOT EXISTS idx_transcript_sources_status
+    ON transcript_sources (status);
