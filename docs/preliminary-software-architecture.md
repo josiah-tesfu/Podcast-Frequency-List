@@ -15,8 +15,7 @@ Local-first batch pipeline.
 
 ### `discovery`
 
-- Podcast Index client
-- Show search
+- Manual feed entry
 - Canonical feed resolution
 
 ### `ingest`
@@ -134,7 +133,7 @@ Local-first batch pipeline.
 
 ## Pipeline Flow
 
-`Podcast Index -> RSS feeds -> episode inventory -> transcript fetch/ASR -> normalized segments -> cleaned segments -> n-gram candidates -> ranked shortlist -> curated notes -> Anki export`
+`Manual feed URL -> RSS feeds -> episode inventory -> transcript fetch/ASR -> normalized segments -> cleaned segments -> n-gram candidates -> ranked shortlist -> curated notes -> Anki export`
 
 ## Recommended Repo Layout
 

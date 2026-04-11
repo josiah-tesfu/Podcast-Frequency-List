@@ -25,8 +25,8 @@
 
 ### 3. Feed discovery
 
-- Build Podcast Index client
-- Search shows and store canonical feed URLs
+- Add manual feed URL workflow
+- Store canonical feed URLs directly
 - Add RSS parser
 - Save all episodes with metadata and transcript-tag detection
 

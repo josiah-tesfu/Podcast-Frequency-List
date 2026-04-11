@@ -5,7 +5,6 @@ CREATE TABLE IF NOT EXISTS app_meta (
 
 CREATE TABLE IF NOT EXISTS shows (
     show_id INTEGER PRIMARY KEY,
-    podcast_index_id INTEGER UNIQUE,
     title TEXT NOT NULL,
     feed_url TEXT NOT NULL UNIQUE,
     site_url TEXT,

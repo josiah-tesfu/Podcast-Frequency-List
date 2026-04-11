@@ -13,7 +13,6 @@ def _seed_normalization_data(db_path):
     with connect(db_path) as connection:
         show_id = upsert_show(
             connection,
-            podcast_index_id=None,
             title="Zack en Roue Libre by Zack Nani",
             feed_url="https://example.com/zack.xml",
         )

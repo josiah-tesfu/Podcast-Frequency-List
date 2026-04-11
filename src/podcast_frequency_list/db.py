@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 
 def get_schema_path() -> Path:
@@ -34,6 +34,7 @@ def bootstrap_database(db_path: Path | None = None) -> Path:
 
     connection = connect(target_path)
     try:
+        migrate_legacy_schema(connection)
         connection.executescript(load_schema())
         connection.execute(
             """
@@ -50,10 +51,65 @@ def bootstrap_database(db_path: Path | None = None) -> Path:
     return target_path
 
 
+def migrate_legacy_schema(connection: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(shows)")
+    }
+    if "podcast_index_id" not in columns:
+        return
+
+    connection.execute("PRAGMA foreign_keys = OFF;")
+    connection.execute(
+        """
+        CREATE TABLE shows_migrated (
+            show_id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL,
+            feed_url TEXT NOT NULL UNIQUE,
+            site_url TEXT,
+            language TEXT,
+            bucket TEXT,
+            description TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO shows_migrated (
+            show_id,
+            title,
+            feed_url,
+            site_url,
+            language,
+            bucket,
+            description,
+            created_at,
+            updated_at
+        )
+        SELECT
+            show_id,
+            title,
+            feed_url,
+            site_url,
+            language,
+            bucket,
+            description,
+            created_at,
+            updated_at
+        FROM shows
+        """
+    )
+    connection.execute("DROP TABLE shows")
+    connection.execute("ALTER TABLE shows_migrated RENAME TO shows")
+    connection.execute("PRAGMA foreign_keys = ON;")
+    connection.commit()
+
+
 def upsert_show(
     connection: sqlite3.Connection,
     *,
-    podcast_index_id: int | None,
     title: str,
     feed_url: str,
     site_url: str | None = None,
@@ -61,33 +117,16 @@ def upsert_show(
     bucket: str | None = None,
     description: str | None = None,
 ) -> int:
-    matching_show_ids: set[int] = set()
-
-    if podcast_index_id is not None:
-        row = connection.execute(
-            "SELECT show_id FROM shows WHERE podcast_index_id = ?",
-            (podcast_index_id,),
-        ).fetchone()
-        if row is not None:
-            matching_show_ids.add(row["show_id"])
-
     row = connection.execute(
         "SELECT show_id FROM shows WHERE feed_url = ?",
         (feed_url,),
     ).fetchone()
     if row is not None:
-        matching_show_ids.add(row["show_id"])
-
-    if len(matching_show_ids) > 1:
-        raise ValueError("conflicting existing shows found for podcast_index_id/feed_url")
-
-    if matching_show_ids:
-        show_id = matching_show_ids.pop()
+        show_id = row["show_id"]
         connection.execute(
             """
             UPDATE shows
-            SET podcast_index_id = ?,
-                title = ?,
+            SET title = ?,
                 feed_url = ?,
                 site_url = ?,
                 language = ?,
@@ -97,7 +136,6 @@ def upsert_show(
             WHERE show_id = ?
             """,
             (
-                podcast_index_id,
                 title,
                 feed_url,
                 site_url,
@@ -112,7 +150,6 @@ def upsert_show(
     cursor = connection.execute(
         """
         INSERT INTO shows (
-            podcast_index_id,
             title,
             feed_url,
             site_url,
@@ -120,10 +157,9 @@ def upsert_show(
             bucket,
             description
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?)
         """,
         (
-            podcast_index_id,
             title,
             feed_url,
             site_url,
@@ -140,7 +176,6 @@ def get_show_by_id(connection: sqlite3.Connection, show_id: int) -> sqlite3.Row 
         """
         SELECT
             show_id,
-            podcast_index_id,
             title,
             feed_url,
             site_url,
@@ -158,7 +193,6 @@ def update_show(
     connection: sqlite3.Connection,
     *,
     show_id: int,
-    podcast_index_id: int | None,
     title: str,
     feed_url: str,
     site_url: str | None = None,
@@ -169,8 +203,7 @@ def update_show(
     connection.execute(
         """
         UPDATE shows
-        SET podcast_index_id = ?,
-            title = ?,
+        SET title = ?,
             feed_url = ?,
             site_url = ?,
             language = ?,
@@ -180,7 +213,6 @@ def update_show(
         WHERE show_id = ?
         """,
         (
-            podcast_index_id,
             title,
             feed_url,
             site_url,

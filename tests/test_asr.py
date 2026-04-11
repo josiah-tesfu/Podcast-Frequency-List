@@ -57,7 +57,6 @@ def _seed_pilot(db_path: Path) -> int:
     with connect(db_path) as connection:
         show_id = upsert_show(
             connection,
-            podcast_index_id=None,
             title="Zack en Roue Libre by Zack Nani",
             feed_url="https://example.com/zack.xml",
         )

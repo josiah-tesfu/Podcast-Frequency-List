@@ -1,58 +1,9 @@
-import hashlib
-
 import httpx
 import pytest
 
 from podcast_frequency_list.db import bootstrap_database, connect
 from podcast_frequency_list.discovery.feed_verifier import FeedVerificationError, FeedVerifier
-from podcast_frequency_list.discovery.models import PodcastCandidate
-from podcast_frequency_list.discovery.podcast_index import PodcastIndexClient, rank_candidates
 from podcast_frequency_list.discovery.service import ShowDiscoveryService
-
-
-def test_podcast_index_client_sends_expected_auth_headers() -> None:
-    expected_timestamp = "1700000000"
-    expected_authorization = hashlib.sha1(b"keysecret1700000000").hexdigest()
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        assert request.headers["X-Auth-Key"] == "key"
-        assert request.headers["X-Auth-Date"] == expected_timestamp
-        assert request.headers["Authorization"] == expected_authorization
-        return httpx.Response(200, json={"status": "true", "feeds": []})
-
-    client = PodcastIndexClient(
-        api_key="key",
-        api_secret="secret",
-        transport=httpx.MockTransport(handler),
-        time_provider=lambda: 1700000000,
-    )
-
-    try:
-        client.search_by_title("InnerFrench")
-    finally:
-        client.close()
-
-
-def test_rank_candidates_prefers_exact_french_match() -> None:
-    candidates = [
-        PodcastCandidate(
-            podcast_index_id=1,
-            title="InnerFrench",
-            feed_url="https://example.com/inner.xml",
-            language="fr",
-        ),
-        PodcastCandidate(
-            podcast_index_id=2,
-            title="InnerFrench Podcast",
-            feed_url="https://example.com/other.xml",
-            language="en",
-        ),
-    ]
-
-    ranked = rank_candidates("InnerFrench", candidates)
-
-    assert ranked[0].podcast_index_id == 1
-    assert ranked[0].score > ranked[1].score
 
 
 def test_feed_verifier_accepts_matching_rss_feed() -> None:
@@ -140,7 +91,6 @@ def test_manual_feed_save_persists_show_metadata(tmp_path) -> None:
     verifier = FeedVerifier(transport=httpx.MockTransport(handler))
     service = ShowDiscoveryService(
         db_path=db_path,
-        podcast_index_client=None,
         feed_verifier=verifier,
     )
 

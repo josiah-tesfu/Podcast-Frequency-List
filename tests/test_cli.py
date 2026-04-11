@@ -5,7 +5,7 @@ from typer.testing import CliRunner
 from podcast_frequency_list.asr.models import AsrEpisodeResult, AsrRunResult
 from podcast_frequency_list.cli import app
 from podcast_frequency_list.config import load_settings
-from podcast_frequency_list.discovery.models import PodcastCandidate, SavedShow
+from podcast_frequency_list.discovery.models import SavedShow
 from podcast_frequency_list.ingest.models import SyncFeedResult
 from podcast_frequency_list.normalize.models import NormalizationRunResult
 from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResult
@@ -15,37 +15,10 @@ runner = CliRunner()
 
 class FakeDiscoveryService:
     def __init__(self) -> None:
-        self.saved_candidate: PodcastCandidate | None = None
         self.manual_feed_url: str | None = None
         self.manual_title: str | None = None
         self.manual_language: str | None = None
         self.manual_bucket: str | None = None
-
-    def search(self, query: str, *, limit: int = 5) -> list[PodcastCandidate]:
-        assert query == "InnerFrench"
-        assert limit == 2
-        return [
-            PodcastCandidate(
-                podcast_index_id=1,
-                title="InnerFrench",
-                feed_url="https://example.com/feed.xml",
-                site_url="https://example.com",
-                author="Hugo",
-                language="fr",
-                score=175.0,
-            ),
-            PodcastCandidate(
-                podcast_index_id=2,
-                title="Another Show",
-                feed_url="https://example.com/other.xml",
-                language="en",
-                score=90.0,
-            ),
-        ]
-
-    def save_selected_candidate(self, candidate: PodcastCandidate) -> SavedShow:
-        self.saved_candidate = candidate
-        return SavedShow(show_id=7, title=candidate.title, feed_url=candidate.feed_url)
 
     def save_manual_feed(
         self,
@@ -236,25 +209,6 @@ def test_init_db_creates_database(tmp_path, monkeypatch) -> None:
         ).fetchall()
 
     assert rows == [("app_meta",), ("episodes",), ("shows",)]
-
-    load_settings.cache_clear()
-
-
-def test_discover_show_selects_and_saves_candidate(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
-    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
-    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
-    load_settings.cache_clear()
-
-    fake_service = FakeDiscoveryService()
-    monkeypatch.setattr("podcast_frequency_list.cli.build_discovery_service", lambda: fake_service)
-
-    result = runner.invoke(app, ["discover-show", "InnerFrench", "--limit", "2", "--select", "1"])
-
-    assert result.exit_code == 0
-    assert "saved_show_id=7" in result.stdout
-    assert fake_service.saved_candidate is not None
-    assert fake_service.saved_candidate.title == "InnerFrench"
 
     load_settings.cache_clear()
 

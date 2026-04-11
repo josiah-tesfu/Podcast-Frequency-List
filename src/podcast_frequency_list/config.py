@@ -26,8 +26,6 @@ class Settings:
     db_path: Path
     raw_data_dir: Path
     processed_data_dir: Path
-    podcast_index_api_key: str
-    podcast_index_api_secret: str
     openai_api_key: str
     asr_model: str
 
@@ -44,8 +42,6 @@ def load_settings() -> Settings:
         db_path=_resolve_path("DB_PATH", DEFAULT_DB_PATH),
         raw_data_dir=_resolve_path("RAW_DATA_DIR", DEFAULT_RAW_DATA_DIR),
         processed_data_dir=_resolve_path("PROCESSED_DATA_DIR", DEFAULT_PROCESSED_DATA_DIR),
-        podcast_index_api_key=os.getenv("PODCAST_INDEX_API_KEY", ""),
-        podcast_index_api_secret=os.getenv("PODCAST_INDEX_API_SECRET", ""),
         openai_api_key=os.getenv("OPENAI_API_KEY", ""),
         asr_model=os.getenv("ASR_MODEL", DEFAULT_ASR_MODEL),
     )

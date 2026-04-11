@@ -30,7 +30,6 @@ class SyncFeedService:
             update_show(
                 connection,
                 show_id=show_id,
-                podcast_index_id=show_row["podcast_index_id"],
                 title=show_row["title"],
                 feed_url=parsed_feed.show.feed_url,
                 site_url=show_row["site_url"] or parsed_feed.show.site_url,

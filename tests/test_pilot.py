@@ -5,7 +5,6 @@ from podcast_frequency_list.pilot import PilotSelectionError, PilotSelectionServ
 def _seed_show(connection) -> int:
     return upsert_show(
         connection,
-        podcast_index_id=None,
         title="Zack en Roue Libre by Zack Nani",
         feed_url="https://example.com/zack.xml",
     )

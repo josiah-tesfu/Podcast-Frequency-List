@@ -87,7 +87,6 @@ def test_sync_feed_service_upserts_episodes_and_skips_missing_audio(tmp_path) ->
     with connect(db_path) as connection:
         show_id = upsert_show(
             connection,
-            podcast_index_id=None,
             title="Manual Title",
             feed_url="https://example.com/feed.xml",
             bucket="native",

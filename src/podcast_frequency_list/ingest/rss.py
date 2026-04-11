@@ -9,8 +9,8 @@ from xml.etree import ElementTree
 import feedparser
 import httpx
 
+from podcast_frequency_list.discovery.common import DEFAULT_USER_AGENT
 from podcast_frequency_list.discovery.feed_verifier import extract_feed_metadata
-from podcast_frequency_list.discovery.podcast_index import DEFAULT_USER_AGENT
 from podcast_frequency_list.ingest.models import EpisodeRecord, FeedShowMetadata, ParsedFeed
 
 

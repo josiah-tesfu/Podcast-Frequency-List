@@ -32,7 +32,7 @@ Build a 2,000-item French spoken frequency deck from podcast transcripts drawn f
 
 ### 2. Build episode inventory
 
-- Use Podcast Index to find canonical RSS feeds
+- Use direct podcast RSS feeds as canonical sources
 - Verify against show sites
 - Parse feeds into one episode table
 - Track transcript presence, audio validity, metadata completeness

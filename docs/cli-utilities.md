@@ -16,7 +16,6 @@ Current command list:
 - `create-pilot`
 - `run-asr`
 - `normalize-transcripts`
-- `discover-show`
 
 ## Core Workflow
 
@@ -105,7 +104,7 @@ Output:
 
 Use it when:
 - feed is already known
-- manual flow is preferred over Podcast Index
+- manual feed flow is the project standard
 
 ### `sync-feed`
 
@@ -259,30 +258,6 @@ uv run podfreq run-asr --pilot zack-10h-pilot --force
 uv run podfreq create-pilot --show-id 1 --name zack-3h-pilot --hours 3
 uv run podfreq run-asr --pilot zack-3h-pilot
 ```
-
-### `discover-show`
-
-What it does:
-- searches Podcast Index
-- lists candidate shows
-- saves a selected one into the DB
-
-Commands:
-
-```bash
-uv run podfreq discover-show "InnerFrench" --select 1
-uv run podfreq discover-show "InnerFrench" --limit 5
-```
-
-Inputs:
-- query text
-- `--limit`
-- `--select`
-
-Important:
-- this is fallback path right now
-- current working path is manual `add-show`
-- requires Podcast Index credentials if actually used
 
 ### `normalize-transcripts`
 

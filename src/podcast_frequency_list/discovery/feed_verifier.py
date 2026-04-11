@@ -5,8 +5,8 @@ from xml.etree import ElementTree
 
 import httpx
 
+from podcast_frequency_list.discovery.common import DEFAULT_USER_AGENT, normalize_text
 from podcast_frequency_list.discovery.models import VerifiedFeed
-from podcast_frequency_list.discovery.podcast_index import DEFAULT_USER_AGENT, normalize_text
 
 
 class FeedVerificationError(RuntimeError):
