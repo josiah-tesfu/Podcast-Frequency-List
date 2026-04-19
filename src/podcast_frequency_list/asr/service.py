@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from podcast_frequency_list.asr.audio import AudioChunker, AudioDownloader
 from podcast_frequency_list.asr.client import OpenAITranscriber
 from podcast_frequency_list.asr.models import AsrEpisodeResult, AsrRunResult, AudioChunk
-from podcast_frequency_list.db import connect
+from podcast_frequency_list.db import connect, upsert_transcript_source
 
 
 class Transcriber(Protocol):
@@ -18,6 +18,16 @@ class Transcriber(Protocol):
 
 class AsrRunError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class _AsrEpisodeJob:
+    episode_id: int
+    show_id: int
+    title: str
+    audio_url: str
+    duration_seconds: int
+    status: str | None
 
 
 class AsrRunService:
@@ -78,7 +88,7 @@ class AsrRunService:
         pilot_name: str,
         limit: int | None,
         force: bool,
-    ) -> list[sqlite3.Row]:
+    ) -> list[_AsrEpisodeJob]:
         limit_sql = "" if limit is None else "LIMIT ?"
         parameters: list[object] = [self.transcriber.model, pilot_name]
         if limit is not None:
@@ -89,14 +99,11 @@ class AsrRunService:
             rows = connection.execute(
                 f"""
                 SELECT
-                    pr.pilot_run_id,
                     e.episode_id,
                     e.show_id,
                     e.title,
                     e.audio_url,
                     e.duration_seconds,
-                    pre.position,
-                    ts.source_id,
                     ts.status
                 FROM pilot_runs pr
                 JOIN pilot_run_episodes pre
@@ -115,15 +122,25 @@ class AsrRunService:
                 parameters,
             ).fetchall()
 
-        return list(rows)
+        return [
+            _AsrEpisodeJob(
+                episode_id=int(row["episode_id"]),
+                show_id=int(row["show_id"]),
+                title=str(row["title"]),
+                audio_url=str(row["audio_url"]),
+                duration_seconds=int(row["duration_seconds"]),
+                status=row["status"],
+            )
+            for row in rows
+        ]
 
-    def _run_episode(self, *, episode: sqlite3.Row, force: bool) -> AsrEpisodeResult:
-        episode_id = int(episode["episode_id"])
-        title = episode["title"]
+    def _run_episode(self, *, episode: _AsrEpisodeJob, force: bool) -> AsrEpisodeResult:
+        episode_id = episode.episode_id
+        title = episode.title
         audio_path: Path | None = None
         transcript_path: Path | None = None
 
-        if episode["status"] == "ready" and not force:
+        if episode.status == "ready" and not force:
             return AsrEpisodeResult(
                 episode_id=episode_id,
                 title=title,
@@ -137,13 +154,13 @@ class AsrRunService:
 
         try:
             audio_path = self.audio_downloader.download(
-                show_id=int(episode["show_id"]),
+                show_id=episode.show_id,
                 episode_id=episode_id,
-                audio_url=episode["audio_url"],
+                audio_url=episode.audio_url,
             )
             chunks = self.audio_chunker.chunk(
                 audio_path=audio_path,
-                duration_seconds=int(episode["duration_seconds"]),
+                duration_seconds=episode.duration_seconds,
                 episode_id=episode_id,
             )
             source_id = self._set_source_status(episode_id=episode_id, status="in_progress")
@@ -196,44 +213,13 @@ class AsrRunService:
         raw_path: str | None = None,
     ) -> int:
         with connect(self.db_path) as connection:
-            row = connection.execute(
-                """
-                SELECT source_id
-                FROM transcript_sources
-                WHERE episode_id = ?
-                AND source_type = 'asr'
-                AND model = ?
-                """,
-                (episode_id, self.transcriber.model),
-            ).fetchone()
-
-            if row is None:
-                cursor = connection.execute(
-                    """
-                    INSERT INTO transcript_sources (
-                        episode_id,
-                        source_type,
-                        status,
-                        model,
-                        raw_path
-                    )
-                    VALUES (?, 'asr', ?, ?, ?)
-                    """,
-                    (episode_id, status, self.transcriber.model, raw_path),
-                )
-                connection.commit()
-                return int(cursor.lastrowid)
-
-            source_id = int(row["source_id"])
-            connection.execute(
-                """
-                UPDATE transcript_sources
-                SET status = ?,
-                    raw_path = COALESCE(?, raw_path),
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE source_id = ?
-                """,
-                (status, raw_path, source_id),
+            source_id = upsert_transcript_source(
+                connection,
+                episode_id=episode_id,
+                source_type="asr",
+                status=status,
+                model=self.transcriber.model,
+                raw_path=raw_path,
             )
             connection.commit()
             return source_id

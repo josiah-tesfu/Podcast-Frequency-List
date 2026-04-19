@@ -1,17 +1,26 @@
 from __future__ import annotations
 
-import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from podcast_frequency_list.db import connect
 from podcast_frequency_list.normalize.models import NormalizationRunResult
 from podcast_frequency_list.normalize.text import normalize_transcript_text
+from podcast_frequency_list.transcript_scope import resolve_transcript_scope
 
 NORMALIZATION_VERSION = "1"
 
 
 class TranscriptNormalizationError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class _NormalizationTarget:
+    segment_id: int
+    episode_id: int
+    raw_text: str
+    normalization_version: str | None
 
 
 class TranscriptNormalizationService:
@@ -25,15 +34,17 @@ class TranscriptNormalizationService:
         episode_id: int | None = None,
         force: bool = False,
     ) -> NormalizationRunResult:
-        if (pilot_name is None and episode_id is None) or (
-            pilot_name is not None and episode_id is not None
-        ):
-            raise TranscriptNormalizationError(
-                "provide exactly one of pilot_name or episode_id"
-            )
+        scope = resolve_transcript_scope(
+            pilot_name=pilot_name,
+            episode_id=episode_id,
+            error_type=TranscriptNormalizationError,
+        )
 
-        rows = self._load_segments(pilot_name=pilot_name, episode_id=episode_id)
-        if not rows:
+        targets = self._load_targets(
+            pilot_name=scope.pilot_name,
+            episode_id=scope.episode_id,
+        )
+        if not targets:
             raise TranscriptNormalizationError("no transcript segments found for normalization")
 
         normalized_segments = 0
@@ -41,9 +52,9 @@ class TranscriptNormalizationService:
         episode_ids: set[int] = set()
 
         with connect(self.db_path) as connection:
-            for row in rows:
-                episode_ids.add(int(row["episode_id"]))
-                if row["normalization_version"] == NORMALIZATION_VERSION and not force:
+            for target in targets:
+                episode_ids.add(target.episode_id)
+                if target.normalization_version == NORMALIZATION_VERSION and not force:
                     skipped_segments += 1
                     continue
 
@@ -63,39 +74,32 @@ class TranscriptNormalizationService:
                         updated_at = CURRENT_TIMESTAMP
                     """,
                     (
-                        row["segment_id"],
-                        row["episode_id"],
+                        target.segment_id,
+                        target.episode_id,
                         NORMALIZATION_VERSION,
-                        normalize_transcript_text(row["raw_text"]),
+                        normalize_transcript_text(target.raw_text),
                     ),
                 )
                 normalized_segments += 1
 
             connection.commit()
 
-        if pilot_name is not None:
-            scope = "pilot"
-            scope_value = pilot_name
-        else:
-            scope = "episode"
-            scope_value = str(episode_id)
-
         return NormalizationRunResult(
-            scope=scope,
-            scope_value=scope_value,
+            scope=scope.kind,
+            scope_value=scope.scope_value,
             normalization_version=NORMALIZATION_VERSION,
-            selected_segments=len(rows),
+            selected_segments=len(targets),
             normalized_segments=normalized_segments,
             skipped_segments=skipped_segments,
             episode_count=len(episode_ids),
         )
 
-    def _load_segments(
+    def _load_targets(
         self,
         *,
         pilot_name: str | None,
         episode_id: int | None,
-    ) -> list[sqlite3.Row]:
+    ) -> list[_NormalizationTarget]:
         with connect(self.db_path) as connection:
             if pilot_name is not None:
                 rows = connection.execute(
@@ -103,7 +107,6 @@ class TranscriptNormalizationService:
                     SELECT
                         ts.segment_id,
                         ts.episode_id,
-                        ts.chunk_index,
                         ts.raw_text,
                         ns.normalization_version
                     FROM transcript_segments ts
@@ -127,7 +130,6 @@ class TranscriptNormalizationService:
                     SELECT
                         ts.segment_id,
                         ts.episode_id,
-                        ts.chunk_index,
                         ts.raw_text,
                         ns.normalization_version
                     FROM transcript_segments ts
@@ -142,4 +144,12 @@ class TranscriptNormalizationService:
                     (episode_id,),
                 ).fetchall()
 
-        return list(rows)
+        return [
+            _NormalizationTarget(
+                segment_id=int(row["segment_id"]),
+                episode_id=int(row["episode_id"]),
+                raw_text=str(row["raw_text"]),
+                normalization_version=row["normalization_version"],
+            )
+            for row in rows
+        ]

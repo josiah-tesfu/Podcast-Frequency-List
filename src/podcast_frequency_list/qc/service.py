@@ -1,17 +1,28 @@
 from __future__ import annotations
 
-import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from podcast_frequency_list.db import connect
 from podcast_frequency_list.qc.models import QcRunResult
 from podcast_frequency_list.qc.rules import QcInputSegment, evaluate_segment_qc
+from podcast_frequency_list.transcript_scope import resolve_transcript_scope
 
 QC_VERSION = "1"
 
 
 class SegmentQcError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class _QcSegmentRecord:
+    segment_id: int
+    episode_id: int
+    show_id: int
+    chunk_index: int
+    normalized_text: str
+    qc_version: str | None = None
 
 
 class SegmentQcService:
@@ -25,16 +36,20 @@ class SegmentQcService:
         episode_id: int | None = None,
         force: bool = False,
     ) -> QcRunResult:
-        if (pilot_name is None and episode_id is None) or (
-            pilot_name is not None and episode_id is not None
-        ):
-            raise SegmentQcError("provide exactly one of pilot_name or episode_id")
+        scope = resolve_transcript_scope(
+            pilot_name=pilot_name,
+            episode_id=episode_id,
+            error_type=SegmentQcError,
+        )
 
-        target_rows = self._load_target_segments(pilot_name=pilot_name, episode_id=episode_id)
+        target_rows = self._load_targets(
+            pilot_name=scope.pilot_name,
+            episode_id=scope.episode_id,
+        )
         if not target_rows:
             raise SegmentQcError("no normalized segments found for qc")
 
-        show_ids = {int(row["show_id"]) for row in target_rows}
+        show_ids = {row.show_id for row in target_rows}
         if len(show_ids) != 1:
             raise SegmentQcError("qc scope must resolve to exactly one show")
 
@@ -53,18 +68,18 @@ class SegmentQcService:
 
         with connect(self.db_path) as connection:
             for row in target_rows:
-                if row["qc_version"] == QC_VERSION and not force:
+                if row.qc_version == QC_VERSION and not force:
                     skipped_segments += 1
                     continue
 
-                evaluation = evaluations[int(row["segment_id"])]
+                evaluation = evaluations[row.segment_id]
                 connection.execute(
                     """
                     DELETE FROM segment_qc_flags
                     WHERE segment_id = ?
                     AND qc_version = ?
                     """,
-                    (row["segment_id"], QC_VERSION),
+                    (row.segment_id, QC_VERSION),
                 )
                 connection.execute(
                     """
@@ -124,16 +139,9 @@ class SegmentQcService:
 
             connection.commit()
 
-        if pilot_name is not None:
-            scope = "pilot"
-            scope_value = pilot_name
-        else:
-            scope = "episode"
-            scope_value = str(episode_id)
-
         return QcRunResult(
-            scope=scope,
-            scope_value=scope_value,
+            scope=scope.kind,
+            scope_value=scope.scope_value,
             qc_version=QC_VERSION,
             selected_segments=len(target_rows),
             processed_segments=processed_segments,
@@ -143,12 +151,12 @@ class SegmentQcService:
             remove_segments=remove_segments,
         )
 
-    def _load_target_segments(
+    def _load_targets(
         self,
         *,
         pilot_name: str | None,
         episode_id: int | None,
-    ) -> list[sqlite3.Row]:
+    ) -> list[_QcSegmentRecord]:
         with connect(self.db_path) as connection:
             if pilot_name is not None:
                 rows = connection.execute(
@@ -206,9 +214,20 @@ class SegmentQcService:
                     """,
                     (QC_VERSION, episode_id),
                 ).fetchall()
-        return list(rows)
 
-    def _load_reference_segments(self, *, show_id: int) -> list[sqlite3.Row]:
+        return [
+            _QcSegmentRecord(
+                segment_id=int(row["segment_id"]),
+                episode_id=int(row["episode_id"]),
+                show_id=int(row["show_id"]),
+                chunk_index=int(row["chunk_index"]),
+                normalized_text=str(row["normalized_text"]),
+                qc_version=row["qc_version"],
+            )
+            for row in rows
+        ]
+
+    def _load_reference_segments(self, *, show_id: int) -> list[_QcSegmentRecord]:
         with connect(self.db_path) as connection:
             rows = connection.execute(
                 """
@@ -231,12 +250,22 @@ class SegmentQcService:
                 """,
                 (show_id,),
             ).fetchall()
-        return list(rows)
 
-    def _to_input_segment(self, row: sqlite3.Row) -> QcInputSegment:
+        return [
+            _QcSegmentRecord(
+                segment_id=int(row["segment_id"]),
+                episode_id=int(row["episode_id"]),
+                show_id=int(row["show_id"]),
+                chunk_index=int(row["chunk_index"]),
+                normalized_text=str(row["normalized_text"]),
+            )
+            for row in rows
+        ]
+
+    def _to_input_segment(self, row: _QcSegmentRecord) -> QcInputSegment:
         return QcInputSegment(
-            segment_id=int(row["segment_id"]),
-            episode_id=int(row["episode_id"]),
-            chunk_index=int(row["chunk_index"]),
-            normalized_text=str(row["normalized_text"]),
+            segment_id=row.segment_id,
+            episode_id=row.episode_id,
+            chunk_index=row.chunk_index,
+            normalized_text=row.normalized_text,
         )

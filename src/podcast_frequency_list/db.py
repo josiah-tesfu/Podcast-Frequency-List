@@ -306,3 +306,75 @@ def upsert_episode(
         ),
     )
     return True
+
+
+def upsert_transcript_source(
+    connection: sqlite3.Connection,
+    *,
+    episode_id: int,
+    source_type: str,
+    status: str,
+    model: str,
+    raw_path: str | None = None,
+    estimated_cost_usd: float | None = None,
+    preserve_ready: bool = False,
+) -> int:
+    row = connection.execute(
+        """
+        SELECT source_id, status
+        FROM transcript_sources
+        WHERE episode_id = ?
+        AND source_type = ?
+        AND model = ?
+        """,
+        (episode_id, source_type, model),
+    ).fetchone()
+
+    if row is None:
+        cursor = connection.execute(
+            """
+            INSERT INTO transcript_sources (
+                episode_id,
+                source_type,
+                status,
+                model,
+                raw_path,
+                estimated_cost_usd
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (episode_id, source_type, status, model, raw_path, estimated_cost_usd),
+        )
+        return int(cursor.lastrowid)
+
+    source_id = int(row["source_id"])
+    current_status = str(row["status"])
+    next_status = current_status if preserve_ready and current_status == "ready" else status
+
+    connection.execute(
+        """
+        UPDATE transcript_sources
+        SET status = ?,
+            raw_path = COALESCE(?, raw_path),
+            estimated_cost_usd = COALESCE(?, estimated_cost_usd),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE source_id = ?
+        """,
+        (next_status, raw_path, estimated_cost_usd, source_id),
+    )
+    return source_id
+
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "bootstrap_database",
+    "connect",
+    "get_schema_path",
+    "get_show_by_id",
+    "load_schema",
+    "migrate_legacy_schema",
+    "update_show",
+    "upsert_episode",
+    "upsert_show",
+    "upsert_transcript_source",
+]
