@@ -16,6 +16,7 @@ Current command list:
 - `create-pilot`
 - `run-asr`
 - `normalize-transcripts`
+- `qc-segments`
 
 ## Core Workflow
 
@@ -26,6 +27,7 @@ Normal flow:
 4. run ASR on a small smoke test
 5. run ASR on the rest of the pilot
 6. normalize transcript text for downstream processing
+7. add QC flags for intros/outros and obvious ASR junk
 
 Example:
 
@@ -36,6 +38,7 @@ uv run podfreq create-pilot --show-id 1 --name zack-10h-pilot --hours 10
 uv run podfreq run-asr --pilot zack-10h-pilot --limit 1
 uv run podfreq run-asr --pilot zack-10h-pilot --limit 5
 uv run podfreq normalize-transcripts --pilot zack-10h-pilot
+uv run podfreq qc-segments --pilot zack-10h-pilot
 ```
 
 ## Command Reference
@@ -258,6 +261,46 @@ uv run podfreq run-asr --pilot zack-10h-pilot --force
 uv run podfreq create-pilot --show-id 1 --name zack-3h-pilot --hours 3
 uv run podfreq run-asr --pilot zack-3h-pilot
 ```
+
+### `qc-segments`
+
+What it does:
+- runs the first reversible cleanup layer on normalized transcript chunks
+- writes `keep`, `review`, or `remove` status per chunk
+- stores explicit QC flags instead of editing transcript text
+
+Commands:
+
+```bash
+uv run podfreq qc-segments --pilot zack-10h-pilot
+uv run podfreq qc-segments --episode-id 1
+uv run podfreq qc-segments --pilot zack-10h-pilot --force
+```
+
+Inputs:
+- `--pilot`: process all normalized chunks in one named pilot
+- `--episode-id`: process one episode instead
+- `--force`: rerun QC even if the current QC version already exists
+
+Current v1 rules:
+- repeated intro chunks across the same show -> `remove`
+- repeated outro CTA chunks across the same show -> `remove`
+- obvious repetition-heavy ASR junk -> `review` or `remove`
+
+What changes:
+- writes summary rows to `segment_qc`
+- writes detailed flags to `segment_qc_flags`
+- does not modify raw ASR text
+- does not modify normalized text
+
+Output:
+- selected vs processed chunk counts
+- keep/review/remove counts
+
+How to use it:
+- run after `normalize-transcripts`
+- use `remove` chunks as default exclusions later
+- inspect `review` chunks before stronger cleanup rules are added
 
 ### `normalize-transcripts`
 

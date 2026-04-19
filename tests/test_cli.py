@@ -9,6 +9,7 @@ from podcast_frequency_list.discovery.models import SavedShow
 from podcast_frequency_list.ingest.models import SyncFeedResult
 from podcast_frequency_list.normalize.models import NormalizationRunResult
 from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResult
+from podcast_frequency_list.qc.models import QcRunResult
 
 runner = CliRunner()
 
@@ -175,6 +176,35 @@ class FakeTranscriptNormalizationService:
             normalized_segments=6,
             skipped_segments=0,
             episode_count=2,
+        )
+
+
+class FakeSegmentQcService:
+    def __init__(self) -> None:
+        self.pilot_name: str | None = None
+        self.episode_id: int | None = None
+        self.force: bool | None = None
+
+    def run(
+        self,
+        *,
+        pilot_name: str | None = None,
+        episode_id: int | None = None,
+        force: bool = False,
+    ) -> QcRunResult:
+        self.pilot_name = pilot_name
+        self.episode_id = episode_id
+        self.force = force
+        return QcRunResult(
+            scope="pilot",
+            scope_value=pilot_name or "",
+            qc_version="1",
+            selected_segments=6,
+            processed_segments=6,
+            skipped_segments=0,
+            keep_segments=4,
+            review_segments=1,
+            remove_segments=1,
         )
 
 
@@ -361,6 +391,37 @@ def test_normalize_transcripts_prints_stats(tmp_path, monkeypatch) -> None:
     assert "scope=pilot" in result.stdout
     assert "scope_value=zack-10h-pilot" in result.stdout
     assert "normalized_segments=6" in result.stdout
+    assert fake_service.pilot_name == "zack-10h-pilot"
+    assert fake_service.episode_id is None
+    assert fake_service.force is False
+
+    load_settings.cache_clear()
+
+
+def test_qc_segments_prints_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeSegmentQcService()
+    monkeypatch.setattr("podcast_frequency_list.cli.build_segment_qc_service", lambda: fake_service)
+
+    result = runner.invoke(
+        app,
+        [
+            "qc-segments",
+            "--pilot",
+            "zack-10h-pilot",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "scope=pilot" in result.stdout
+    assert "scope_value=zack-10h-pilot" in result.stdout
+    assert "processed_segments=6" in result.stdout
+    assert "review_segments=1" in result.stdout
+    assert "remove_segments=1" in result.stdout
     assert fake_service.pilot_name == "zack-10h-pilot"
     assert fake_service.episode_id is None
     assert fake_service.force is False

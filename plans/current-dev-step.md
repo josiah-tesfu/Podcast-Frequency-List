@@ -1,5 +1,5 @@
-Current step: transcript normalization.
+Current step: QC / removal flags.
 
 Notes:
-- Keep raw transcript text immutable.
-- Normalize by pilot or by episode.
+- Flag only.
+- Keep QC reversible.

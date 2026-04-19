@@ -116,3 +116,35 @@ CREATE TABLE IF NOT EXISTS normalized_segments (
 
 CREATE INDEX IF NOT EXISTS idx_normalized_segments_episode_id
     ON normalized_segments (episode_id);
+
+CREATE TABLE IF NOT EXISTS segment_qc (
+    segment_qc_id INTEGER PRIMARY KEY,
+    segment_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    qc_version TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('keep', 'review', 'remove')),
+    reason_summary TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (segment_id) REFERENCES transcript_segments(segment_id) ON DELETE CASCADE,
+    FOREIGN KEY (episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE,
+    UNIQUE (segment_id, qc_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_segment_qc_episode_id
+    ON segment_qc (episode_id);
+
+CREATE TABLE IF NOT EXISTS segment_qc_flags (
+    segment_qc_flag_id INTEGER PRIMARY KEY,
+    segment_id INTEGER NOT NULL,
+    qc_version TEXT NOT NULL,
+    flag TEXT NOT NULL,
+    rule_name TEXT NOT NULL,
+    details TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (segment_id) REFERENCES transcript_segments(segment_id) ON DELETE CASCADE,
+    UNIQUE (segment_id, qc_version, flag, rule_name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_segment_qc_flags_segment_id
+    ON segment_qc_flags (segment_id);

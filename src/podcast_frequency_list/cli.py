@@ -30,12 +30,14 @@ from podcast_frequency_list.normalize import (
     TranscriptNormalizationService,
 )
 from podcast_frequency_list.pilot import PilotSelectionError, PilotSelectionService
+from podcast_frequency_list.qc import SegmentQcError, SegmentQcService
 
 app = typer.Typer(
     add_completion=False,
     help="CLI for building the podcast-based French frequency deck.",
     no_args_is_help=True,
 )
+
 
 def build_manual_discovery_service() -> ShowDiscoveryService:
     settings = load_settings()
@@ -79,6 +81,12 @@ def build_asr_run_service() -> AsrRunService:
 def build_transcript_normalization_service() -> TranscriptNormalizationService:
     settings = load_settings()
     return TranscriptNormalizationService(db_path=settings.db_path)
+
+
+def build_segment_qc_service() -> SegmentQcService:
+    settings = load_settings()
+    return SegmentQcService(db_path=settings.db_path)
+
 
 @app.command("info")
 def info() -> None:
@@ -252,6 +260,35 @@ def normalize_transcripts(
         typer.echo(f"skipped_segments={result.skipped_segments}")
         typer.echo(f"episodes_touched={result.episode_count}")
     except TranscriptNormalizationError as exc:
+        typer.echo(f"error={exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("qc-segments")
+def qc_segments(
+    pilot: str | None = typer.Option(None, "--pilot"),
+    episode_id: int | None = typer.Option(None, "--episode-id", min=1),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    bootstrap_database()
+    service = build_segment_qc_service()
+
+    try:
+        result = service.run(
+            pilot_name=pilot,
+            episode_id=episode_id,
+            force=force,
+        )
+        typer.echo(f"scope={result.scope}")
+        typer.echo(f"scope_value={result.scope_value}")
+        typer.echo(f"qc_version={result.qc_version}")
+        typer.echo(f"selected_segments={result.selected_segments}")
+        typer.echo(f"processed_segments={result.processed_segments}")
+        typer.echo(f"skipped_segments={result.skipped_segments}")
+        typer.echo(f"keep_segments={result.keep_segments}")
+        typer.echo(f"review_segments={result.review_segments}")
+        typer.echo(f"remove_segments={result.remove_segments}")
+    except SegmentQcError as exc:
         typer.echo(f"error={exc}")
         raise typer.Exit(code=1) from exc
 
