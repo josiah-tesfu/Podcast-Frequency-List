@@ -4,6 +4,7 @@ import typer
 
 from podcast_frequency_list.asr import (
     AsrRunError,
+    AsrRunResult,
     AsrRunService,
     AudioChunker,
     AudioDownloader,
@@ -11,6 +12,17 @@ from podcast_frequency_list.asr import (
 )
 from podcast_frequency_list.asr.audio import DEFAULT_SAFE_UPLOAD_BYTES
 from podcast_frequency_list.asr.client import OpenAITranscriptionError
+from podcast_frequency_list.cli_output import (
+    emit_asr_result,
+    emit_fields,
+    emit_normalization_result,
+    emit_pilot_result,
+    emit_qc_result,
+    emit_saved_show,
+    emit_sentence_split_result,
+    emit_sync_result,
+    run_service_command,
+)
 from podcast_frequency_list.config import load_settings
 from podcast_frequency_list.db import bootstrap_database
 from podcast_frequency_list.discovery import (
@@ -31,7 +43,10 @@ from podcast_frequency_list.normalize import (
 )
 from podcast_frequency_list.pilot import PilotSelectionError, PilotSelectionService
 from podcast_frequency_list.qc import SegmentQcError, SegmentQcService
-from podcast_frequency_list.sentences import SentenceSplitError, SentenceSplitService
+from podcast_frequency_list.sentences import (
+    SentenceSplitError,
+    SentenceSplitService,
+)
 
 app = typer.Typer(
     add_completion=False,
@@ -98,16 +113,20 @@ def build_sentence_split_service() -> SentenceSplitService:
 def info() -> None:
     settings = load_settings()
 
-    typer.echo(f"project_root={settings.project_root}")
-    typer.echo(f"db_path={settings.db_path}")
-    typer.echo(f"raw_data_dir={settings.raw_data_dir}")
-    typer.echo(f"processed_data_dir={settings.processed_data_dir}")
+    emit_fields(
+        (
+            ("project_root", settings.project_root),
+            ("db_path", settings.db_path),
+            ("raw_data_dir", settings.raw_data_dir),
+            ("processed_data_dir", settings.processed_data_dir),
+        )
+    )
 
 
 @app.command("init-db")
 def init_db() -> None:
     db_path = bootstrap_database()
-    typer.echo(f"initialized_db={db_path}")
+    emit_fields((("initialized_db", db_path),))
 
 
 @app.command("add-show")
@@ -118,23 +137,18 @@ def add_show(
     bucket: str | None = typer.Option(None),
 ) -> None:
     bootstrap_database()
-    service = build_manual_discovery_service()
-
-    try:
-        saved_show = service.save_manual_feed(
-            feed_url=feed_url,
-            title=title,
-            language=language,
-            bucket=bucket,
-        )
-        typer.echo(f"saved_show_id={saved_show.show_id}")
-        typer.echo(f"title={saved_show.title}")
-        typer.echo(f"feed_url={saved_show.feed_url}")
-    except FeedVerificationError as exc:
-        typer.echo(f"error={exc}")
-        raise typer.Exit(code=1) from exc
-    finally:
-        service.close()
+    run_service_command(
+        build_manual_discovery_service,
+        lambda service: emit_saved_show(
+            service.save_manual_feed(
+                feed_url=feed_url,
+                title=title,
+                language=language,
+                bucket=bucket,
+            )
+        ),
+        FeedVerificationError,
+    )
 
 
 @app.command("sync-feed")
@@ -143,22 +157,11 @@ def sync_feed(
     limit: int | None = typer.Option(None, min=1),
 ) -> None:
     bootstrap_database()
-    service = build_sync_feed_service()
-
-    try:
-        result = service.sync_show(show_id=show_id, limit=limit)
-        typer.echo(f"show_id={result.show_id}")
-        typer.echo(f"title={result.title}")
-        typer.echo(f"episodes_seen={result.episodes_seen}")
-        typer.echo(f"episodes_inserted={result.episodes_inserted}")
-        typer.echo(f"episodes_updated={result.episodes_updated}")
-        typer.echo(f"episodes_skipped_no_audio={result.episodes_skipped_no_audio}")
-        typer.echo(f"episodes_with_transcript_tag={result.episodes_with_transcript_tag}")
-    except (RssFeedError, SyncFeedError) as exc:
-        typer.echo(f"error={exc}")
-        raise typer.Exit(code=1) from exc
-    finally:
-        service.close()
+    run_service_command(
+        build_sync_feed_service,
+        lambda service: emit_sync_result(service.sync_show(show_id=show_id, limit=limit)),
+        (RssFeedError, SyncFeedError),
+    )
 
 
 @app.command("create-pilot")
@@ -170,33 +173,19 @@ def create_pilot(
     notes: str | None = typer.Option(None, "--notes"),
 ) -> None:
     bootstrap_database()
-    service = build_pilot_selection_service()
-
-    try:
-        result = service.create_pilot(
-            show_id=show_id,
-            name=name,
-            target_seconds=round(hours * 3600),
-            selection_order=selection_order,
-            notes=notes,
-        )
-        typer.echo(f"pilot_run_id={result.pilot_run_id}")
-        typer.echo(f"name={result.name}")
-        typer.echo(f"show_id={result.show_id}")
-        typer.echo(f"title={result.show_title}")
-        typer.echo(f"target_hours={result.target_seconds / 3600:.2f}")
-        typer.echo(f"selected_hours={result.total_seconds / 3600:.2f}")
-        typer.echo(f"selected_episodes={result.selected_count}")
-        typer.echo(f"skipped_ineligible_episodes={result.skipped_count}")
-        typer.echo(f"selection_order={result.selection_order}")
-        typer.echo(f"model={result.model}")
-        typer.echo(f"estimated_asr_cost_usd={result.estimated_cost_usd:.2f}")
-        typer.echo(f"first_selected_published_at={result.first_published_at or '-'}")
-        typer.echo(f"last_selected_published_at={result.last_published_at or '-'}")
-        typer.echo("status=needs_asr")
-    except PilotSelectionError as exc:
-        typer.echo(f"error={exc}")
-        raise typer.Exit(code=1) from exc
+    run_service_command(
+        build_pilot_selection_service,
+        lambda service: emit_pilot_result(
+            service.create_pilot(
+                show_id=show_id,
+                name=name,
+                target_seconds=round(hours * 3600),
+                selection_order=selection_order,
+                notes=notes,
+            )
+        ),
+        PilotSelectionError,
+    )
 
 
 @app.command("run-asr")
@@ -206,41 +195,20 @@ def run_asr(
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     bootstrap_database()
+    result: AsrRunResult | None = None
 
-    try:
-        service = build_asr_run_service()
-    except OpenAITranscriptionError as exc:
-        typer.echo(f"error={exc}")
-        raise typer.Exit(code=1) from exc
-
-    try:
+    def _run(service: AsrRunService) -> None:
+        nonlocal result
         result = service.run_pilot(pilot_name=pilot, limit=limit, force=force)
-        typer.echo(f"pilot={result.pilot_name}")
-        typer.echo(f"model={result.model}")
-        typer.echo(f"requested_limit={result.requested_limit or '-'}")
-        typer.echo(f"selected_episodes={result.selected_count}")
-        typer.echo(f"completed_episodes={result.completed_count}")
-        typer.echo(f"skipped_episodes={result.skipped_count}")
-        typer.echo(f"failed_episodes={result.failed_count}")
-        typer.echo(f"chunks_transcribed={result.chunk_count}")
-        for episode_result in result.episode_results:
-            typer.echo(
-                f"episode_id={episode_result.episode_id} status={episode_result.status} "
-                f"chunks={episode_result.chunk_count} chars={episode_result.text_chars}"
-            )
-            if episode_result.transcript_path:
-                typer.echo(f"transcript_path={episode_result.transcript_path}")
-            if episode_result.preview:
-                typer.echo(f"preview={episode_result.preview}")
-            if episode_result.error:
-                typer.echo(f"error={episode_result.error}")
-        if result.failed_count:
-            raise typer.Exit(code=1)
-    except AsrRunError as exc:
-        typer.echo(f"error={exc}")
-        raise typer.Exit(code=1) from exc
-    finally:
-        service.close()
+        emit_asr_result(result)
+
+    run_service_command(
+        build_asr_run_service,
+        _run,
+        (OpenAITranscriptionError, AsrRunError),
+    )
+    if result is not None and result.failed_count:
+        raise typer.Exit(code=1)
 
 
 @app.command("normalize-transcripts")
@@ -250,24 +218,17 @@ def normalize_transcripts(
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     bootstrap_database()
-    service = build_transcript_normalization_service()
-
-    try:
-        result = service.normalize(
-            pilot_name=pilot,
-            episode_id=episode_id,
-            force=force,
-        )
-        typer.echo(f"scope={result.scope}")
-        typer.echo(f"scope_value={result.scope_value}")
-        typer.echo(f"normalization_version={result.normalization_version}")
-        typer.echo(f"selected_segments={result.selected_segments}")
-        typer.echo(f"normalized_segments={result.normalized_segments}")
-        typer.echo(f"skipped_segments={result.skipped_segments}")
-        typer.echo(f"episodes_touched={result.episode_count}")
-    except TranscriptNormalizationError as exc:
-        typer.echo(f"error={exc}")
-        raise typer.Exit(code=1) from exc
+    run_service_command(
+        build_transcript_normalization_service,
+        lambda service: emit_normalization_result(
+            service.normalize(
+                pilot_name=pilot,
+                episode_id=episode_id,
+                force=force,
+            )
+        ),
+        TranscriptNormalizationError,
+    )
 
 
 @app.command("qc-segments")
@@ -277,26 +238,17 @@ def qc_segments(
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     bootstrap_database()
-    service = build_segment_qc_service()
-
-    try:
-        result = service.run(
-            pilot_name=pilot,
-            episode_id=episode_id,
-            force=force,
-        )
-        typer.echo(f"scope={result.scope}")
-        typer.echo(f"scope_value={result.scope_value}")
-        typer.echo(f"qc_version={result.qc_version}")
-        typer.echo(f"selected_segments={result.selected_segments}")
-        typer.echo(f"processed_segments={result.processed_segments}")
-        typer.echo(f"skipped_segments={result.skipped_segments}")
-        typer.echo(f"keep_segments={result.keep_segments}")
-        typer.echo(f"review_segments={result.review_segments}")
-        typer.echo(f"remove_segments={result.remove_segments}")
-    except SegmentQcError as exc:
-        typer.echo(f"error={exc}")
-        raise typer.Exit(code=1) from exc
+    run_service_command(
+        build_segment_qc_service,
+        lambda service: emit_qc_result(
+            service.run(
+                pilot_name=pilot,
+                episode_id=episode_id,
+                force=force,
+            )
+        ),
+        SegmentQcError,
+    )
 
 
 @app.command("split-sentences")
@@ -306,24 +258,17 @@ def split_sentences(
     force: bool = typer.Option(False, "--force"),
 ) -> None:
     bootstrap_database()
-    service = build_sentence_split_service()
-
-    try:
-        result = service.split(
-            pilot_name=pilot,
-            episode_id=episode_id,
-            force=force,
-        )
-        typer.echo(f"scope={result.scope}")
-        typer.echo(f"scope_value={result.scope_value}")
-        typer.echo(f"split_version={result.split_version}")
-        typer.echo(f"selected_segments={result.selected_segments}")
-        typer.echo(f"created_sentences={result.created_sentences}")
-        typer.echo(f"skipped_segments={result.skipped_segments}")
-        typer.echo(f"episodes_touched={result.episode_count}")
-    except SentenceSplitError as exc:
-        typer.echo(f"error={exc}")
-        raise typer.Exit(code=1) from exc
+    run_service_command(
+        build_sentence_split_service,
+        lambda service: emit_sentence_split_result(
+            service.split(
+                pilot_name=pilot,
+                episode_id=episode_id,
+                force=force,
+            )
+        ),
+        SentenceSplitError,
+    )
 
 
 def main() -> None:

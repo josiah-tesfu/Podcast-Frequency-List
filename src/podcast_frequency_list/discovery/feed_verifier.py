@@ -7,94 +7,11 @@ import httpx
 
 from podcast_frequency_list.discovery.common import DEFAULT_USER_AGENT, normalize_text
 from podcast_frequency_list.discovery.models import VerifiedFeed
+from podcast_frequency_list.feed_parsing import extract_feed_metadata, fetch_feed_document
 
 
 class FeedVerificationError(RuntimeError):
     pass
-
-
-def _strip_namespace(tag: str) -> str:
-    return tag.split("}", 1)[-1] if "}" in tag else tag
-
-
-def _extract_child_text(element: ElementTree.Element, child_name: str) -> str | None:
-    for child in element:
-        if _strip_namespace(child.tag).lower() == child_name and child.text:
-            return child.text.strip()
-    return None
-
-
-def _find_child(element: ElementTree.Element, child_name: str) -> ElementTree.Element | None:
-    for child in element:
-        if _strip_namespace(child.tag).lower() == child_name:
-            return child
-    return None
-
-
-def _extract_atom_link(element: ElementTree.Element) -> str | None:
-    for child in element:
-        if _strip_namespace(child.tag).lower() != "link":
-            continue
-
-        href = child.attrib.get("href")
-        rel = child.attrib.get("rel", "alternate")
-        if href and rel in {"alternate", "self"}:
-            return href.strip()
-
-    return None
-
-
-def _get_feed_container(root: ElementTree.Element) -> ElementTree.Element:
-    root_name = _strip_namespace(root.tag).lower()
-
-    if root_name == "rss":
-        channel = root.find("channel")
-        if channel is None:
-            raise FeedVerificationError("rss feed is missing channel metadata")
-        return channel
-
-    if root_name in {"rdf", "rdf:rdf"}:
-        for element in root:
-            if _strip_namespace(element.tag).lower() == "channel":
-                return element
-        raise FeedVerificationError("rdf feed is missing channel metadata")
-
-    if root_name == "feed":
-        return root
-
-    raise FeedVerificationError(f"unsupported feed root element: {root.tag}")
-
-
-def extract_feed_metadata(document: str) -> dict[str, str | None]:
-    root = ElementTree.fromstring(document)
-    container = _get_feed_container(root)
-    root_name = _strip_namespace(root.tag).lower()
-
-    if root_name == "feed":
-        title = _extract_child_text(container, "title")
-        site_url = _extract_atom_link(container)
-        description = _extract_child_text(container, "subtitle")
-        language = container.attrib.get(
-            "{http://www.w3.org/XML/1998/namespace}lang"
-        ) or container.attrib.get("lang")
-    else:
-        title = _extract_child_text(container, "title")
-        site_url = _extract_child_text(container, "link")
-        description = _extract_child_text(container, "description")
-        language = _extract_child_text(container, "language")
-
-    if not title:
-        title = _extract_child_text(container, "itunes:title")
-    if not description:
-        summary = _find_child(container, "summary")
-        description = summary.text.strip() if summary is not None and summary.text else None
-
-    return {
-        "title": title,
-        "site_url": site_url,
-        "description": description,
-        "language": language,
-    }
 
 
 def extract_feed_title(document: str) -> str | None:
@@ -140,20 +57,18 @@ class FeedVerifier:
         self._client.close()
 
     def inspect(self, feed_url: str) -> VerifiedFeed:
-        try:
-            response = self._client.get(feed_url)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise FeedVerificationError(f"feed request failed: {exc}") from exc
-
-        document = response.text.lstrip("\ufeff").strip()
-        if not document:
-            raise FeedVerificationError("feed returned an empty response body")
+        response, document = fetch_feed_document(
+            self._client,
+            feed_url=feed_url,
+            error_type=FeedVerificationError,
+        )
 
         try:
             metadata = extract_feed_metadata(document)
         except ElementTree.ParseError as exc:
             raise FeedVerificationError(f"feed XML could not be parsed: {exc}") from exc
+        except ValueError as exc:
+            raise FeedVerificationError(str(exc)) from exc
 
         feed_title = metadata.get("title")
         if not feed_title:

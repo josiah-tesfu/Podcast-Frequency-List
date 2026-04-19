@@ -10,16 +10,16 @@ import feedparser
 import httpx
 
 from podcast_frequency_list.discovery.common import DEFAULT_USER_AGENT
-from podcast_frequency_list.discovery.feed_verifier import extract_feed_metadata
+from podcast_frequency_list.feed_parsing import (
+    extract_feed_metadata,
+    extract_transcript_tags,
+    fetch_feed_document,
+)
 from podcast_frequency_list.ingest.models import EpisodeRecord, FeedShowMetadata, ParsedFeed
 
 
 class RssFeedError(RuntimeError):
     pass
-
-
-def _strip_namespace(tag: str) -> str:
-    return tag.split("}", 1)[-1] if "}" in tag else tag
 
 
 def parse_duration_seconds(value: str | int | None) -> int | None:
@@ -132,53 +132,6 @@ def _derive_guid(
     return f"generated:{digest}"
 
 
-def _iter_entry_elements(root: ElementTree.Element) -> list[ElementTree.Element]:
-    root_name = _strip_namespace(root.tag).lower()
-
-    if root_name == "rss":
-        channel = root.find("channel")
-        if channel is None:
-            return []
-        return [child for child in channel if _strip_namespace(child.tag).lower() == "item"]
-
-    if root_name == "feed":
-        return [child for child in root if _strip_namespace(child.tag).lower() == "entry"]
-
-    return [child for child in root if _strip_namespace(child.tag).lower() == "item"]
-
-
-def _extract_transcript_items(document: str) -> list[dict[str, str | bool | None]]:
-    try:
-        root = ElementTree.fromstring(document)
-    except ElementTree.ParseError:
-        return []
-
-    transcript_items: list[dict[str, str | bool | None]] = []
-    for element in _iter_entry_elements(root):
-        transcript_url: str | None = None
-
-        for child in element:
-            child_name = _strip_namespace(child.tag).lower()
-            if child_name == "transcript":
-                transcript_url = (child.attrib.get("url") or "").strip() or None
-                if transcript_url is None and child.text:
-                    transcript_url = child.text.strip() or None
-                break
-
-            if child_name == "link" and child.attrib.get("rel", "").lower() == "transcript":
-                transcript_url = (child.attrib.get("href") or "").strip() or None
-                break
-
-        transcript_items.append(
-            {
-                "has_transcript_tag": transcript_url is not None,
-                "transcript_url": transcript_url,
-            }
-        )
-
-    return transcript_items
-
-
 class RssFeedClient:
     def __init__(
         self,
@@ -198,26 +151,27 @@ class RssFeedClient:
         self._client.close()
 
     def parse_feed(self, feed_url: str, *, limit: int | None = None) -> ParsedFeed:
-        try:
-            response = self._client.get(feed_url)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise RssFeedError(f"feed request failed: {exc}") from exc
-
-        document = response.text.lstrip("\ufeff").strip()
-        if not document:
-            raise RssFeedError("feed returned an empty response body")
+        response, document = fetch_feed_document(
+            self._client,
+            feed_url=feed_url,
+            error_type=RssFeedError,
+        )
 
         parsed = feedparser.parse(response.content)
         if parsed.bozo and not parsed.entries and not parsed.feed:
             raise RssFeedError(f"feed parsing failed: {parsed.bozo_exception}")
 
-        metadata = extract_feed_metadata(document)
+        try:
+            metadata = extract_feed_metadata(document)
+        except ElementTree.ParseError as exc:
+            raise RssFeedError(f"feed XML could not be parsed: {exc}") from exc
+        except ValueError as exc:
+            raise RssFeedError(str(exc)) from exc
         feed_title = (parsed.feed.get("title") or metadata.get("title") or "").strip()
         if not feed_title:
             raise RssFeedError("feed title could not be determined")
 
-        transcript_items = _extract_transcript_items(document)
+        transcript_items = extract_transcript_tags(document)
         parsed_entries = parsed.entries[:limit] if limit is not None else parsed.entries
 
         episodes: list[EpisodeRecord] = []
@@ -231,7 +185,7 @@ class RssFeedClient:
             transcript_item = (
                 transcript_items[index]
                 if index < len(transcript_items)
-                else {"has_transcript_tag": False, "transcript_url": None}
+                else None
             )
             duration_seconds = parse_duration_seconds(
                 entry.get("itunes_duration") or entry.get("duration")
@@ -251,8 +205,10 @@ class RssFeedClient:
                     episode_url=episode_url,
                     duration_seconds=duration_seconds,
                     summary=_extract_summary(entry),
-                    has_transcript_tag=bool(transcript_item["has_transcript_tag"]),
-                    transcript_url=transcript_item["transcript_url"],
+                    has_transcript_tag=bool(
+                        transcript_item.has_transcript_tag if transcript_item else False
+                    ),
+                    transcript_url=transcript_item.transcript_url if transcript_item else None,
                 )
             )
 

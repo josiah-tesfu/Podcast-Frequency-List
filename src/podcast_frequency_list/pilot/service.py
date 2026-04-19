@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from podcast_frequency_list.db import connect, get_show_by_id
+from podcast_frequency_list.db import connect, get_show_by_id, upsert_transcript_source
 from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResult
 
 DEFAULT_ASR_MODEL = "gpt-4o-mini-transcribe"
@@ -208,33 +208,14 @@ class PilotSelectionService:
         episode_id: int,
         duration_seconds: int,
     ) -> None:
-        connection.execute(
-            """
-            INSERT INTO transcript_sources (
-                episode_id,
-                source_type,
-                status,
-                model,
-                estimated_cost_usd
-            )
-            VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(episode_id, source_type, model)
-            DO UPDATE SET
-                status = CASE
-                    WHEN transcript_sources.status = 'ready'
-                    THEN transcript_sources.status
-                    ELSE excluded.status
-                END,
-                estimated_cost_usd = excluded.estimated_cost_usd,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (
-                episode_id,
-                "asr",
-                "needs_asr",
-                self.asr_model,
-                self._estimate_cost(duration_seconds),
-            ),
+        upsert_transcript_source(
+            connection,
+            episode_id=episode_id,
+            source_type="asr",
+            status="needs_asr",
+            model=self.asr_model,
+            estimated_cost_usd=self._estimate_cost(duration_seconds),
+            preserve_ready=True,
         )
 
     def _estimate_cost(self, duration_seconds: int) -> float:

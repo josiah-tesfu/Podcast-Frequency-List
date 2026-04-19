@@ -1,18 +1,27 @@
 from __future__ import annotations
 
-import sqlite3
+from dataclasses import dataclass
 from pathlib import Path
 
 from podcast_frequency_list.db import connect
-from podcast_frequency_list.qc import QC_VERSION
+from podcast_frequency_list.qc.service import QC_VERSION
 from podcast_frequency_list.sentences.models import SentenceSplitResult
 from podcast_frequency_list.sentences.splitter import split_segment_text
+from podcast_frequency_list.transcript_scope import resolve_transcript_scope
 
 SPLIT_VERSION = "1"
 
 
 class SentenceSplitError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class _SentenceSplitTarget:
+    segment_id: int
+    episode_id: int
+    normalized_text: str
+    existing_sentence_count: int
 
 
 class SentenceSplitService:
@@ -26,13 +35,17 @@ class SentenceSplitService:
         episode_id: int | None = None,
         force: bool = False,
     ) -> SentenceSplitResult:
-        if (pilot_name is None and episode_id is None) or (
-            pilot_name is not None and episode_id is not None
-        ):
-            raise SentenceSplitError("provide exactly one of pilot_name or episode_id")
+        scope = resolve_transcript_scope(
+            pilot_name=pilot_name,
+            episode_id=episode_id,
+            error_type=SentenceSplitError,
+        )
 
-        rows = self._load_keep_segments(pilot_name=pilot_name, episode_id=episode_id)
-        if not rows:
+        targets = self._load_targets(
+            pilot_name=scope.pilot_name,
+            episode_id=scope.episode_id,
+        )
+        if not targets:
             raise SentenceSplitError("no keep segments found for sentence splitting")
 
         created_sentences = 0
@@ -40,9 +53,9 @@ class SentenceSplitService:
         episode_ids: set[int] = set()
 
         with connect(self.db_path) as connection:
-            for row in rows:
-                episode_ids.add(int(row["episode_id"]))
-                if row["existing_sentence_count"] > 0 and not force:
+            for target in targets:
+                episode_ids.add(target.episode_id)
+                if target.existing_sentence_count > 0 and not force:
                     skipped_segments += 1
                     continue
 
@@ -52,10 +65,10 @@ class SentenceSplitService:
                     WHERE segment_id = ?
                     AND split_version = ?
                     """,
-                    (row["segment_id"], SPLIT_VERSION),
+                    (target.segment_id, SPLIT_VERSION),
                 )
 
-                sentences = split_segment_text(str(row["normalized_text"]))
+                sentences = split_segment_text(target.normalized_text)
                 for sentence in sentences:
                     connection.execute(
                         """
@@ -71,8 +84,8 @@ class SentenceSplitService:
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
-                            row["segment_id"],
-                            row["episode_id"],
+                            target.segment_id,
+                            target.episode_id,
                             SPLIT_VERSION,
                             sentence.sentence_index,
                             sentence.char_start,
@@ -84,29 +97,22 @@ class SentenceSplitService:
 
             connection.commit()
 
-        if pilot_name is not None:
-            scope = "pilot"
-            scope_value = pilot_name
-        else:
-            scope = "episode"
-            scope_value = str(episode_id)
-
         return SentenceSplitResult(
-            scope=scope,
-            scope_value=scope_value,
+            scope=scope.kind,
+            scope_value=scope.scope_value,
             split_version=SPLIT_VERSION,
-            selected_segments=len(rows),
+            selected_segments=len(targets),
             created_sentences=created_sentences,
             skipped_segments=skipped_segments,
             episode_count=len(episode_ids),
         )
 
-    def _load_keep_segments(
+    def _load_targets(
         self,
         *,
         pilot_name: str | None,
         episode_id: int | None,
-    ) -> list[sqlite3.Row]:
+    ) -> list[_SentenceSplitTarget]:
         with connect(self.db_path) as connection:
             if pilot_name is not None:
                 rows = connection.execute(
@@ -114,7 +120,6 @@ class SentenceSplitService:
                     SELECT
                         ns.segment_id,
                         ns.episode_id,
-                        ts.chunk_index,
                         ns.normalized_text,
                         COUNT(ss.sentence_id) AS existing_sentence_count
                     FROM normalized_segments ns
@@ -150,7 +155,6 @@ class SentenceSplitService:
                     SELECT
                         ns.segment_id,
                         ns.episode_id,
-                        ts.chunk_index,
                         ns.normalized_text,
                         COUNT(ss.sentence_id) AS existing_sentence_count
                     FROM normalized_segments ns
@@ -177,4 +181,12 @@ class SentenceSplitService:
                     (QC_VERSION, SPLIT_VERSION, episode_id),
                 ).fetchall()
 
-        return list(rows)
+        return [
+            _SentenceSplitTarget(
+                segment_id=int(row["segment_id"]),
+                episode_id=int(row["episode_id"]),
+                normalized_text=str(row["normalized_text"]),
+                existing_sentence_count=int(row["existing_sentence_count"]),
+            )
+            for row in rows
+        ]
