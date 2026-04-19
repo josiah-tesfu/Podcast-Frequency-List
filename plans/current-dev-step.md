@@ -1,5 +1,5 @@
-Current step: QC / removal flags.
+Current step: sentence splitting.
 
 Notes:
-- Flag only.
-- Keep QC reversible.
+- Split `keep` chunks only.
+- Do not merge across chunks.

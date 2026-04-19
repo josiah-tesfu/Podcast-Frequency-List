@@ -12,6 +12,7 @@ dependencies = [
   "feedparser>=6.0,<7.0",
   "httpx>=0.28,<0.29",
   "imageio-ffmpeg>=0.6,<0.7",
+  "spacy>=3.8,<4.0",
   "typer>=0.12,<1.0",
 ]
 

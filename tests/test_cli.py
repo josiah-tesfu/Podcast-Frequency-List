@@ -10,6 +10,7 @@ from podcast_frequency_list.ingest.models import SyncFeedResult
 from podcast_frequency_list.normalize.models import NormalizationRunResult
 from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResult
 from podcast_frequency_list.qc.models import QcRunResult
+from podcast_frequency_list.sentences.models import SentenceSplitResult
 
 runner = CliRunner()
 
@@ -205,6 +206,33 @@ class FakeSegmentQcService:
             keep_segments=4,
             review_segments=1,
             remove_segments=1,
+        )
+
+
+class FakeSentenceSplitService:
+    def __init__(self) -> None:
+        self.pilot_name: str | None = None
+        self.episode_id: int | None = None
+        self.force: bool | None = None
+
+    def split(
+        self,
+        *,
+        pilot_name: str | None = None,
+        episode_id: int | None = None,
+        force: bool = False,
+    ) -> SentenceSplitResult:
+        self.pilot_name = pilot_name
+        self.episode_id = episode_id
+        self.force = force
+        return SentenceSplitResult(
+            scope="pilot",
+            scope_value=pilot_name or "",
+            split_version="1",
+            selected_segments=5,
+            created_sentences=14,
+            skipped_segments=0,
+            episode_count=2,
         )
 
 
@@ -422,6 +450,39 @@ def test_qc_segments_prints_stats(tmp_path, monkeypatch) -> None:
     assert "processed_segments=6" in result.stdout
     assert "review_segments=1" in result.stdout
     assert "remove_segments=1" in result.stdout
+    assert fake_service.pilot_name == "zack-10h-pilot"
+    assert fake_service.episode_id is None
+    assert fake_service.force is False
+
+    load_settings.cache_clear()
+
+
+def test_split_sentences_prints_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeSentenceSplitService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_sentence_split_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "split-sentences",
+            "--pilot",
+            "zack-10h-pilot",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "scope=pilot" in result.stdout
+    assert "scope_value=zack-10h-pilot" in result.stdout
+    assert "split_version=1" in result.stdout
+    assert "created_sentences=14" in result.stdout
     assert fake_service.pilot_name == "zack-10h-pilot"
     assert fake_service.episode_id is None
     assert fake_service.force is False

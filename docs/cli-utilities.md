@@ -17,6 +17,7 @@ Current command list:
 - `run-asr`
 - `normalize-transcripts`
 - `qc-segments`
+- `split-sentences`
 
 ## Core Workflow
 
@@ -28,6 +29,7 @@ Normal flow:
 5. run ASR on the rest of the pilot
 6. normalize transcript text for downstream processing
 7. add QC flags for intros/outros and obvious ASR junk
+8. split kept chunks into sentence-like context lines
 
 Example:
 
@@ -39,6 +41,7 @@ uv run podfreq run-asr --pilot zack-10h-pilot --limit 1
 uv run podfreq run-asr --pilot zack-10h-pilot --limit 5
 uv run podfreq normalize-transcripts --pilot zack-10h-pilot
 uv run podfreq qc-segments --pilot zack-10h-pilot
+uv run podfreq split-sentences --pilot zack-10h-pilot
 ```
 
 ## Command Reference
@@ -301,6 +304,43 @@ How to use it:
 - run after `normalize-transcripts`
 - use `remove` chunks as default exclusions later
 - inspect `review` chunks before stronger cleanup rules are added
+
+### `split-sentences`
+
+What it does:
+- splits `keep` transcript chunks into sentence-like rows
+- preserves chunk boundaries
+- creates context units for later token extraction
+
+Commands:
+
+```bash
+uv run podfreq split-sentences --pilot zack-10h-pilot
+uv run podfreq split-sentences --episode-id 1
+uv run podfreq split-sentences --pilot zack-10h-pilot --force
+```
+
+Inputs:
+- `--pilot`: split all `keep` chunks in one named pilot
+- `--episode-id`: split one episode instead
+- `--force`: rerun sentence splitting for the current split version
+
+What changes:
+- writes rows to `segment_sentences`
+- stores sentence order and character offsets
+- does not modify normalized text
+- does not modify QC rows
+
+Output:
+- selected chunk count
+- sentence row count created
+- skipped chunk count
+- episode count touched
+
+How to use it:
+- run after `qc-segments`
+- sentence splitting uses `keep` chunks only
+- next downstream step is token / n-gram generation
 
 ### `normalize-transcripts`
 

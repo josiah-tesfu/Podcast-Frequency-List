@@ -31,6 +31,7 @@ from podcast_frequency_list.normalize import (
 )
 from podcast_frequency_list.pilot import PilotSelectionError, PilotSelectionService
 from podcast_frequency_list.qc import SegmentQcError, SegmentQcService
+from podcast_frequency_list.sentences import SentenceSplitError, SentenceSplitService
 
 app = typer.Typer(
     add_completion=False,
@@ -86,6 +87,11 @@ def build_transcript_normalization_service() -> TranscriptNormalizationService:
 def build_segment_qc_service() -> SegmentQcService:
     settings = load_settings()
     return SegmentQcService(db_path=settings.db_path)
+
+
+def build_sentence_split_service() -> SentenceSplitService:
+    settings = load_settings()
+    return SentenceSplitService(db_path=settings.db_path)
 
 
 @app.command("info")
@@ -289,6 +295,33 @@ def qc_segments(
         typer.echo(f"review_segments={result.review_segments}")
         typer.echo(f"remove_segments={result.remove_segments}")
     except SegmentQcError as exc:
+        typer.echo(f"error={exc}")
+        raise typer.Exit(code=1) from exc
+
+
+@app.command("split-sentences")
+def split_sentences(
+    pilot: str | None = typer.Option(None, "--pilot"),
+    episode_id: int | None = typer.Option(None, "--episode-id", min=1),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    bootstrap_database()
+    service = build_sentence_split_service()
+
+    try:
+        result = service.split(
+            pilot_name=pilot,
+            episode_id=episode_id,
+            force=force,
+        )
+        typer.echo(f"scope={result.scope}")
+        typer.echo(f"scope_value={result.scope_value}")
+        typer.echo(f"split_version={result.split_version}")
+        typer.echo(f"selected_segments={result.selected_segments}")
+        typer.echo(f"created_sentences={result.created_sentences}")
+        typer.echo(f"skipped_segments={result.skipped_segments}")
+        typer.echo(f"episodes_touched={result.episode_count}")
+    except SentenceSplitError as exc:
         typer.echo(f"error={exc}")
         raise typer.Exit(code=1) from exc
 

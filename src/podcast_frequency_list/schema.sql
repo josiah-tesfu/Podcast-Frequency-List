@@ -148,3 +148,22 @@ CREATE TABLE IF NOT EXISTS segment_qc_flags (
 
 CREATE INDEX IF NOT EXISTS idx_segment_qc_flags_segment_id
     ON segment_qc_flags (segment_id);
+
+CREATE TABLE IF NOT EXISTS segment_sentences (
+    sentence_id INTEGER PRIMARY KEY,
+    segment_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    split_version TEXT NOT NULL,
+    sentence_index INTEGER NOT NULL,
+    char_start INTEGER NOT NULL,
+    char_end INTEGER NOT NULL,
+    sentence_text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (segment_id) REFERENCES transcript_segments(segment_id) ON DELETE CASCADE,
+    FOREIGN KEY (episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE,
+    UNIQUE (segment_id, split_version, sentence_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_segment_sentences_episode_id
+    ON segment_sentences (episode_id);
