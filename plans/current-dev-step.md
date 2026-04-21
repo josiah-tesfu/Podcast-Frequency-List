@@ -1,5 +1,6 @@
-Current step: sentence splitting.
+Current step: tokenization foundation.
 
 Notes:
-- Split `keep` chunks only.
-- Do not merge across chunks.
+- Convert `segment_sentences` into `sentence_tokens`.
+- Preserve offsets and surface text.
+- Status: implemented and sanity-checked on `zack-10h-pilot`.

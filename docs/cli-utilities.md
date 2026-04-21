@@ -18,6 +18,7 @@ Current command list:
 - `normalize-transcripts`
 - `qc-segments`
 - `split-sentences`
+- `tokenize-sentences`
 
 ## Core Workflow
 
@@ -30,6 +31,7 @@ Normal flow:
 6. normalize transcript text for downstream processing
 7. add QC flags for intros/outros and obvious ASR junk
 8. split kept chunks into sentence-like context lines
+9. tokenize sentence rows for candidate generation
 
 Example:
 
@@ -42,6 +44,7 @@ uv run podfreq run-asr --pilot zack-10h-pilot --limit 5
 uv run podfreq normalize-transcripts --pilot zack-10h-pilot
 uv run podfreq qc-segments --pilot zack-10h-pilot
 uv run podfreq split-sentences --pilot zack-10h-pilot
+uv run podfreq tokenize-sentences --pilot zack-10h-pilot
 ```
 
 ## Command Reference
@@ -341,6 +344,43 @@ How to use it:
 - run after `qc-segments`
 - sentence splitting uses `keep` chunks only
 - next downstream step is token / n-gram generation
+
+### `tokenize-sentences`
+
+What it does:
+- converts sentence rows into ordered analysis tokens
+- preserves exact surface text and character offsets
+- splits French apostrophe contractions for analysis
+- keeps protected forms like `aujourd'hui` together
+
+Commands:
+
+```bash
+uv run podfreq tokenize-sentences --pilot zack-10h-pilot
+uv run podfreq tokenize-sentences --episode-id 1
+uv run podfreq tokenize-sentences --pilot zack-10h-pilot --force
+```
+
+Inputs:
+- `--pilot`: tokenize all sentence rows in one named pilot
+- `--episode-id`: tokenize one episode instead
+- `--force`: rerun tokenization for the current tokenization version
+
+What changes:
+- writes rows to `sentence_tokens`
+- stores token keys, surface text, token type, and sentence-relative offsets
+- does not create candidate n-grams yet
+
+Output:
+- selected sentence count
+- tokenized sentence count
+- created token count
+- skipped sentence count
+- episode count touched
+
+How to use it:
+- run after `split-sentences`
+- next downstream step is candidate span generation
 
 ### `normalize-transcripts`
 

@@ -12,6 +12,7 @@ from podcast_frequency_list.normalize import NormalizationRunResult
 from podcast_frequency_list.pilot import PilotSelectionResult
 from podcast_frequency_list.qc import QcRunResult
 from podcast_frequency_list.sentences import SentenceSplitResult
+from podcast_frequency_list.tokens import TokenizationResult
 
 S = TypeVar("S")
 
@@ -160,6 +161,21 @@ def emit_sentence_split_result(result: SentenceSplitResult) -> None:
             ("selected_segments", result.selected_segments),
             ("created_sentences", result.created_sentences),
             ("skipped_segments", result.skipped_segments),
+            ("episodes_touched", result.episode_count),
+        )
+    )
+
+
+def emit_tokenization_result(result: TokenizationResult) -> None:
+    emit_fields(
+        (
+            ("scope", result.scope),
+            ("scope_value", result.scope_value),
+            ("tokenization_version", result.tokenization_version),
+            ("selected_sentences", result.selected_sentences),
+            ("tokenized_sentences", result.tokenized_sentences),
+            ("created_tokens", result.created_tokens),
+            ("skipped_sentences", result.skipped_sentences),
             ("episodes_touched", result.episode_count),
         )
     )

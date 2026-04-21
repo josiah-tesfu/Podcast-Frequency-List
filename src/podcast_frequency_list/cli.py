@@ -21,6 +21,7 @@ from podcast_frequency_list.cli_output import (
     emit_saved_show,
     emit_sentence_split_result,
     emit_sync_result,
+    emit_tokenization_result,
     run_service_command,
 )
 from podcast_frequency_list.config import load_settings
@@ -46,6 +47,10 @@ from podcast_frequency_list.qc import SegmentQcError, SegmentQcService
 from podcast_frequency_list.sentences import (
     SentenceSplitError,
     SentenceSplitService,
+)
+from podcast_frequency_list.tokens import (
+    SentenceTokenizationError,
+    SentenceTokenizationService,
 )
 
 app = typer.Typer(
@@ -107,6 +112,11 @@ def build_segment_qc_service() -> SegmentQcService:
 def build_sentence_split_service() -> SentenceSplitService:
     settings = load_settings()
     return SentenceSplitService(db_path=settings.db_path)
+
+
+def build_sentence_tokenization_service() -> SentenceTokenizationService:
+    settings = load_settings()
+    return SentenceTokenizationService(db_path=settings.db_path)
 
 
 @app.command("info")
@@ -268,6 +278,26 @@ def split_sentences(
             )
         ),
         SentenceSplitError,
+    )
+
+
+@app.command("tokenize-sentences")
+def tokenize_sentences(
+    pilot: str | None = typer.Option(None, "--pilot"),
+    episode_id: int | None = typer.Option(None, "--episode-id", min=1),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    bootstrap_database()
+    run_service_command(
+        build_sentence_tokenization_service,
+        lambda service: emit_tokenization_result(
+            service.tokenize(
+                pilot_name=pilot,
+                episode_id=episode_id,
+                force=force,
+            )
+        ),
+        SentenceTokenizationError,
     )
 
 

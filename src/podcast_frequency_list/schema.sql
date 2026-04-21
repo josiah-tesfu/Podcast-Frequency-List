@@ -167,3 +167,32 @@ CREATE TABLE IF NOT EXISTS segment_sentences (
 
 CREATE INDEX IF NOT EXISTS idx_segment_sentences_episode_id
     ON segment_sentences (episode_id);
+
+CREATE TABLE IF NOT EXISTS sentence_tokens (
+    token_id INTEGER PRIMARY KEY,
+    sentence_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    segment_id INTEGER NOT NULL,
+    tokenization_version TEXT NOT NULL,
+    token_index INTEGER NOT NULL,
+    token_key TEXT NOT NULL,
+    surface_text TEXT NOT NULL,
+    char_start INTEGER NOT NULL,
+    char_end INTEGER NOT NULL,
+    token_type TEXT NOT NULL CHECK (token_type IN ('word', 'number')),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (sentence_id) REFERENCES segment_sentences(sentence_id) ON DELETE CASCADE,
+    FOREIGN KEY (episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE,
+    FOREIGN KEY (segment_id) REFERENCES transcript_segments(segment_id) ON DELETE CASCADE,
+    UNIQUE (sentence_id, tokenization_version, token_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sentence_tokens_sentence_id
+    ON sentence_tokens (sentence_id);
+
+CREATE INDEX IF NOT EXISTS idx_sentence_tokens_episode_id
+    ON sentence_tokens (episode_id);
+
+CREATE INDEX IF NOT EXISTS idx_sentence_tokens_token_key
+    ON sentence_tokens (token_key);
