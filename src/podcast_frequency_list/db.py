@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "8"
+SCHEMA_VERSION = "9"
 
 
 def get_schema_path() -> Path:

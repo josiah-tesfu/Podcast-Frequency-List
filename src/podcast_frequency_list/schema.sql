@@ -196,3 +196,64 @@ CREATE INDEX IF NOT EXISTS idx_sentence_tokens_episode_id
 
 CREATE INDEX IF NOT EXISTS idx_sentence_tokens_token_key
     ON sentence_tokens (token_key);
+
+CREATE TABLE IF NOT EXISTS token_candidates (
+    candidate_id INTEGER PRIMARY KEY,
+    inventory_version TEXT NOT NULL,
+    candidate_key TEXT NOT NULL,
+    display_text TEXT NOT NULL,
+    ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+    raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (inventory_version, candidate_key),
+    UNIQUE (candidate_id, inventory_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_candidates_inventory_version
+    ON token_candidates (inventory_version);
+
+CREATE INDEX IF NOT EXISTS idx_token_candidates_ngram_size
+    ON token_candidates (inventory_version, ngram_size);
+
+CREATE INDEX IF NOT EXISTS idx_token_candidates_frequency
+    ON token_candidates (inventory_version, raw_frequency DESC);
+
+CREATE TABLE IF NOT EXISTS token_occurrences (
+    occurrence_id INTEGER PRIMARY KEY,
+    candidate_id INTEGER NOT NULL,
+    sentence_id INTEGER NOT NULL,
+    episode_id INTEGER NOT NULL,
+    segment_id INTEGER NOT NULL,
+    inventory_version TEXT NOT NULL,
+    token_start_index INTEGER NOT NULL CHECK (token_start_index >= 0),
+    token_end_index INTEGER NOT NULL CHECK (token_end_index > token_start_index),
+    char_start INTEGER NOT NULL CHECK (char_start >= 0),
+    char_end INTEGER NOT NULL CHECK (char_end > char_start),
+    surface_text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (candidate_id, inventory_version)
+        REFERENCES token_candidates(candidate_id, inventory_version)
+        ON DELETE CASCADE,
+    FOREIGN KEY (sentence_id) REFERENCES segment_sentences(sentence_id) ON DELETE CASCADE,
+    FOREIGN KEY (episode_id) REFERENCES episodes(episode_id) ON DELETE CASCADE,
+    FOREIGN KEY (segment_id) REFERENCES transcript_segments(segment_id) ON DELETE CASCADE,
+    UNIQUE (
+        inventory_version,
+        sentence_id,
+        token_start_index,
+        token_end_index
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_token_occurrences_candidate
+    ON token_occurrences (candidate_id);
+
+CREATE INDEX IF NOT EXISTS idx_token_occurrences_sentence
+    ON token_occurrences (sentence_id);
+
+CREATE INDEX IF NOT EXISTS idx_token_occurrences_episode
+    ON token_occurrences (inventory_version, episode_id);
+
+CREATE INDEX IF NOT EXISTS idx_token_occurrences_scope
+    ON token_occurrences (inventory_version, episode_id, segment_id);

@@ -417,7 +417,7 @@ Schema requirements:
 - `token_occurrences` stores every sentence-level occurrence
 - occurrence rows link to candidate, sentence, episode, and segment
 - occurrence rows store token indexes and character offsets
-- duplicate occurrence inserts are prevented by a unique constraint
+- duplicate occurrence inserts are prevented by a unique constraint on version, sentence, and token span
 
 Validation:
 
@@ -430,7 +430,7 @@ Validation:
 Sanity checks:
 
 - candidate key uniqueness is scoped by inventory version
-- occurrence uniqueness prevents duplicate reruns
+- occurrence uniqueness prevents duplicate reruns and duplicate candidates for the same sentence span
 - indexes support candidate lookup, sentence lookup, and episode lookup
 
 Tests:
