@@ -14,6 +14,21 @@ class SentenceToken:
 
 
 @dataclass(frozen=True)
+class CandidateSpan:
+    sentence_id: int
+    episode_id: int
+    segment_id: int
+    candidate_key: str
+    display_text: str
+    ngram_size: int
+    token_start_index: int
+    token_end_index: int
+    char_start: int
+    char_end: int
+    surface_text: str
+
+
+@dataclass(frozen=True)
 class TokenizationResult:
     scope: str
     scope_value: str

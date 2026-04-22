@@ -337,20 +337,258 @@ Output:
 
 ### Step 2: Candidate Inventory
 
-Generate broad contiguous spans.
+Generate broad contiguous spans from `sentence_tokens`.
 
-Deliverables:
+This step is intentionally split into smaller substeps. Candidate inventory is
+the first stage where small implementation mistakes can distort every later
+ranking result.
 
-- `token_candidates` table
-- `token_occurrences` table
-- candidate generation service
-- CLI command, likely `generate-candidates`
-- support for 1/2/3-token spans
+Final Step 2 output:
 
-Output:
+- raw 1/2/3-token candidate inventory
+- every occurrence linked to exact sentence context
+- deterministic reruns for pilot, episode, and full-corpus scopes
+- inspectable DB state before scoring begins
 
-- raw candidate inventory
-- every occurrence linked to sentence context
+#### Step 2A: Span Generator
+
+Build the pure in-memory span generator.
+
+Scope:
+
+- input: one sentence plus its ordered `sentence_tokens`
+- output: valid contiguous 1/2/3-token spans
+- no database writes
+- no scoring
+
+Rules:
+
+- generate only inside one sentence
+- preserve `token_start_index` and exclusive `token_end_index`
+- recover `surface_text` from sentence character offsets
+- use token keys for `candidate_key`
+- use sentence substring for display/surface evidence
+- reject only hard invalid spans: empty, all punctuation, pure numeric, one-letter clitic junk as standalone 1-grams
+
+Validation:
+
+- offset validation: span surface equals sentence substring
+- no span crosses a sentence boundary
+- all emitted spans have stable candidate keys
+- max n-gram size is configurable, default `3`
+
+Sanity checks:
+
+- `J'ai` can produce key `j ai` with surface `J'ai`
+- `l'homme` can produce key `l homme` with surface `l'homme`
+- `22` alone is rejected, but `22 fois` can be kept
+- standalone `j`, `l`, `d`, etc. are rejected as 1-gram junk
+
+Tests:
+
+- apostrophe spans
+- hyphen/protected-token spans
+- numeric filtering
+- one-letter junk filtering
+- max n-gram limit
+- offset recovery
+
+Exit criteria:
+
+- unit tests pass
+- span output looks correct on hand-built French examples
+- no DB schema changes required yet
+
+#### Step 2B: Candidate Inventory Schema
+
+Add persistent storage for candidates and occurrences.
+
+Scope:
+
+- create `token_candidates`
+- create `token_occurrences`
+- add indexes and constraints
+- add inventory versioning
+- no candidate generation service yet
+
+Schema requirements:
+
+- `token_candidates` stores one row per candidate key per inventory version
+- `token_occurrences` stores every sentence-level occurrence
+- occurrence rows link to candidate, sentence, episode, and segment
+- occurrence rows store token indexes and character offsets
+- duplicate occurrence inserts are prevented by a unique constraint
+
+Validation:
+
+- schema version increments once
+- `PRAGMA foreign_key_check` returns no rows
+- table/index existence is verified
+- empty tables can be created from a fresh database
+- existing DB upgrades cleanly through `init_db`
+
+Sanity checks:
+
+- candidate key uniqueness is scoped by inventory version
+- occurrence uniqueness prevents duplicate reruns
+- indexes support candidate lookup, sentence lookup, and episode lookup
+
+Tests:
+
+- schema creation test
+- foreign-key integrity test
+- uniqueness constraint test
+- fresh DB initialization test
+
+Exit criteria:
+
+- DB initializes cleanly
+- full test suite passes
+- no live pilot data written by this substep
+
+#### Step 2C: Inventory Persistence Service
+
+Connect the span generator to the database.
+
+Scope:
+
+- load tokenized sentences by pilot or episode scope
+- generate spans for selected sentences
+- upsert candidate rows
+- insert occurrence rows
+- support `--force` reruns for the selected scope
+- keep scoring out of scope
+
+Rerun behavior:
+
+- default mode skips sentences already processed for the current inventory version
+- `--force` deletes occurrence rows for the selected scope/version, then rebuilds them
+- orphaned candidates for the current inventory version are cleaned up after forced scoped rebuilds
+
+Validation:
+
+- occurrence count equals emitted span count
+- no duplicate occurrences
+- every occurrence has a valid candidate and sentence
+- all occurrence offsets match source sentence substrings
+- all occurrences belong to selected pilot/episode scope
+
+Sanity checks:
+
+- sample candidates link back to readable sentences
+- examples show natural surface spans
+- counts are plausible by sentence count and token count
+- skipped/processed counts make rerun behavior obvious
+
+Tests:
+
+- pilot-scope generation
+- episode-scope generation
+- idempotent rerun without `--force`
+- forced rebuild
+- occurrence foreign-key links
+- offset integrity
+
+Exit criteria:
+
+- inventory generation works on a small fixture DB
+- full test suite passes
+- no scoring columns or ranking logic added here
+
+#### Step 2D: CLI And Reporting
+
+Add the operator-facing command for inventory generation.
+
+Command:
+
+```text
+podfreq generate-candidates --pilot <pilot-name>
+podfreq generate-candidates --episode-id <episode-id>
+podfreq generate-candidates --pilot <pilot-name> --force
+```
+
+Output should include:
+
+- scope
+- scope value
+- inventory version
+- selected sentences
+- processed sentences
+- skipped sentences
+- created/updated candidates
+- created occurrences
+- episodes touched
+
+Validation:
+
+- CLI validates mutually exclusive scope flags
+- CLI returns nonzero on invalid scope
+- output is stable and script-readable
+- docs explain normal run vs forced rerun
+
+Sanity checks:
+
+- first run creates occurrences
+- second run skips already processed sentences
+- forced run rebuilds the same scope
+- command output matches DB counts
+
+Tests:
+
+- CLI help includes command
+- pilot command calls service correctly
+- episode command calls service correctly
+- invalid scope flags fail
+- output formatting test
+
+Exit criteria:
+
+- command can be safely run by hand
+- CLI docs are updated
+- full test suite passes
+
+#### Step 2E: Pilot Run And Inventory Inspection
+
+Run candidate generation on `zack-10h-pilot`.
+
+Required commands:
+
+```text
+uv run podfreq generate-candidates --pilot zack-10h-pilot
+uv run ruff check src tests
+uv run pytest
+```
+
+DB validation:
+
+- total candidates by n-gram size
+- total occurrences by n-gram size
+- duplicate occurrence count is zero
+- foreign-key check is clean
+- offset mismatch count is zero
+- occurrence episode IDs match pilot episodes only
+
+Sanity checks:
+
+- inspect top 1-grams by occurrence count
+- inspect top 2-grams by occurrence count
+- inspect top 3-grams by occurrence count
+- inspect random occurrence rows with sentence context
+- confirm obvious spoken chunks appear: `en fait`, `du coup`, `je pense`, `il y a`
+- confirm junk standalone clitics do not dominate 1-grams
+
+Tests:
+
+- unit and integration tests from 2A-2D remain green
+- pilot run does not require network
+- pilot run is deterministic across reruns
+
+Exit criteria:
+
+- pilot DB inventory is coherent
+- generated candidates are broad enough for later scoring
+- obvious junk is not catastrophically overrepresented
+- Step 3 can compute frequency and dispersion from stored occurrences
 
 ### Step 3: Frequency And Dispersion
 
