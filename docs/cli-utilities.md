@@ -19,6 +19,7 @@ Current command list:
 - `qc-segments`
 - `split-sentences`
 - `tokenize-sentences`
+- `generate-candidates`
 
 ## Core Workflow
 
@@ -32,6 +33,7 @@ Normal flow:
 7. add QC flags for intros/outros and obvious ASR junk
 8. split kept chunks into sentence-like context lines
 9. tokenize sentence rows for candidate generation
+10. generate candidate inventory rows and occurrence evidence
 
 Example:
 
@@ -45,6 +47,7 @@ uv run podfreq normalize-transcripts --pilot zack-10h-pilot
 uv run podfreq qc-segments --pilot zack-10h-pilot
 uv run podfreq split-sentences --pilot zack-10h-pilot
 uv run podfreq tokenize-sentences --pilot zack-10h-pilot
+uv run podfreq generate-candidates --pilot zack-10h-pilot
 ```
 
 ## Command Reference
@@ -380,7 +383,54 @@ Output:
 
 How to use it:
 - run after `split-sentences`
-- next downstream step is candidate span generation
+- next downstream step is `generate-candidates`
+
+### `generate-candidates`
+
+What it does:
+- turns tokenized sentence rows into candidate inventory rows
+- stores one occurrence row per surviving contiguous span
+- recomputes raw frequency counts for the selected scope
+
+Commands:
+
+```bash
+uv run podfreq generate-candidates --pilot zack-10h-pilot
+uv run podfreq generate-candidates --episode-id 1
+uv run podfreq generate-candidates --pilot zack-10h-pilot --force
+```
+
+Inputs:
+- `--pilot`: generate candidates for one named pilot
+- `--episode-id`: generate candidates for one episode instead
+- `--force`: rebuild candidate occurrences for the selected scope
+
+Rules:
+- exactly one of `--pilot` or `--episode-id`
+- only current `split_version` + `tokenization_version` rows are used
+- reruns skip sentences that already have current-version occurrences unless `--force` is set
+
+What changes:
+- upserts rows in `token_candidates`
+- inserts rows in `token_occurrences`
+- refreshes `raw_frequency` from current occurrence counts
+- does not add scoring or ranking columns
+
+Output:
+- scope
+- scope value
+- inventory version
+- selected sentence count
+- processed sentence count
+- skipped sentence count
+- `created_candidates` for genuinely new candidate rows only
+- `created_occurrences` for inserted occurrence rows
+- episode count touched
+
+How to use it:
+- run after `tokenize-sentences`
+- second non-force run should mostly increase `skipped_sentences`
+- `--force` rebuilds the selected scope only
 
 ### `normalize-transcripts`
 

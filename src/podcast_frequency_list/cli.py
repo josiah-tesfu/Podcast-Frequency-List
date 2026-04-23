@@ -14,6 +14,7 @@ from podcast_frequency_list.asr.audio import DEFAULT_SAFE_UPLOAD_BYTES
 from podcast_frequency_list.asr.client import OpenAITranscriptionError
 from podcast_frequency_list.cli_output import (
     emit_asr_result,
+    emit_candidate_inventory_result,
     emit_fields,
     emit_normalization_result,
     emit_pilot_result,
@@ -49,6 +50,8 @@ from podcast_frequency_list.sentences import (
     SentenceSplitService,
 )
 from podcast_frequency_list.tokens import (
+    CandidateInventoryError,
+    CandidateInventoryService,
     SentenceTokenizationError,
     SentenceTokenizationService,
 )
@@ -117,6 +120,11 @@ def build_sentence_split_service() -> SentenceSplitService:
 def build_sentence_tokenization_service() -> SentenceTokenizationService:
     settings = load_settings()
     return SentenceTokenizationService(db_path=settings.db_path)
+
+
+def build_candidate_inventory_service() -> CandidateInventoryService:
+    settings = load_settings()
+    return CandidateInventoryService(db_path=settings.db_path)
 
 
 @app.command("info")
@@ -298,6 +306,26 @@ def tokenize_sentences(
             )
         ),
         SentenceTokenizationError,
+    )
+
+
+@app.command("generate-candidates")
+def generate_candidates(
+    pilot: str | None = typer.Option(None, "--pilot"),
+    episode_id: int | None = typer.Option(None, "--episode-id", min=1),
+    force: bool = typer.Option(False, "--force"),
+) -> None:
+    bootstrap_database()
+    run_service_command(
+        build_candidate_inventory_service,
+        lambda service: emit_candidate_inventory_result(
+            service.generate(
+                pilot_name=pilot,
+                episode_id=episode_id,
+                force=force,
+            )
+        ),
+        CandidateInventoryError,
     )
 
 

@@ -12,7 +12,7 @@ from podcast_frequency_list.normalize import NormalizationRunResult
 from podcast_frequency_list.pilot import PilotSelectionResult
 from podcast_frequency_list.qc import QcRunResult
 from podcast_frequency_list.sentences import SentenceSplitResult
-from podcast_frequency_list.tokens import TokenizationResult
+from podcast_frequency_list.tokens import CandidateInventoryResult, TokenizationResult
 
 S = TypeVar("S")
 
@@ -176,6 +176,22 @@ def emit_tokenization_result(result: TokenizationResult) -> None:
             ("tokenized_sentences", result.tokenized_sentences),
             ("created_tokens", result.created_tokens),
             ("skipped_sentences", result.skipped_sentences),
+            ("episodes_touched", result.episode_count),
+        )
+    )
+
+
+def emit_candidate_inventory_result(result: CandidateInventoryResult) -> None:
+    emit_fields(
+        (
+            ("scope", result.scope),
+            ("scope_value", result.scope_value),
+            ("inventory_version", result.inventory_version),
+            ("selected_sentences", result.selected_sentences),
+            ("processed_sentences", result.processed_sentences),
+            ("skipped_sentences", result.skipped_sentences),
+            ("created_candidates", result.created_candidates),
+            ("created_occurrences", result.created_occurrences),
             ("episodes_touched", result.episode_count),
         )
     )

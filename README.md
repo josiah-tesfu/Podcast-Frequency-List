@@ -46,6 +46,10 @@ uv run podfreq sync-feed --show-id 1
 uv run podfreq create-pilot --show-id 1 --name zack-10h-pilot --hours 10
 uv run podfreq run-asr --pilot zack-10h-pilot --limit 1
 uv run podfreq normalize-transcripts --pilot zack-10h-pilot
+uv run podfreq qc-segments --pilot zack-10h-pilot
+uv run podfreq split-sentences --pilot zack-10h-pilot
+uv run podfreq tokenize-sentences --pilot zack-10h-pilot
+uv run podfreq generate-candidates --pilot zack-10h-pilot
 ```
 
 ## Notes

@@ -11,7 +11,8 @@ from podcast_frequency_list.normalize.models import NormalizationRunResult
 from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResult
 from podcast_frequency_list.qc.models import QcRunResult
 from podcast_frequency_list.sentences.models import SentenceSplitResult
-from podcast_frequency_list.tokens.models import TokenizationResult
+from podcast_frequency_list.tokens import CandidateInventoryError
+from podcast_frequency_list.tokens.models import CandidateInventoryResult, TokenizationResult
 
 runner = CliRunner()
 
@@ -265,11 +266,43 @@ class FakeSentenceTokenizationService:
         )
 
 
+class FakeCandidateInventoryService:
+    def __init__(self) -> None:
+        self.pilot_name: str | None = None
+        self.episode_id: int | None = None
+        self.force: bool | None = None
+
+    def generate(
+        self,
+        *,
+        pilot_name: str | None = None,
+        episode_id: int | None = None,
+        force: bool = False,
+    ) -> CandidateInventoryResult:
+        self.pilot_name = pilot_name
+        self.episode_id = episode_id
+        self.force = force
+        if (pilot_name is None) == (episode_id is None):
+            raise CandidateInventoryError("provide exactly one of pilot_name or episode_id")
+        return CandidateInventoryResult(
+            scope="pilot" if pilot_name is not None else "episode",
+            scope_value=pilot_name or str(episode_id),
+            inventory_version="1",
+            selected_sentences=12,
+            processed_sentences=12,
+            skipped_sentences=0,
+            created_candidates=23,
+            created_occurrences=92,
+            episode_count=2,
+        )
+
+
 def test_cli_help() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
     assert "CLI for building the podcast-based French frequency deck." in result.stdout
+    assert "generate-candidates" in result.stdout
 
 
 def test_init_db_creates_database(tmp_path, monkeypatch) -> None:
@@ -548,5 +581,153 @@ def test_tokenize_sentences_prints_stats(tmp_path, monkeypatch) -> None:
     assert fake_service.pilot_name == "zack-10h-pilot"
     assert fake_service.episode_id is None
     assert fake_service.force is False
+
+    load_settings.cache_clear()
+
+
+def test_generate_candidates_pilot_scope_prints_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateInventoryService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_inventory_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "generate-candidates",
+            "--pilot",
+            "zack-10h-pilot",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert result.stdout.splitlines() == [
+        "scope=pilot",
+        "scope_value=zack-10h-pilot",
+        "inventory_version=1",
+        "selected_sentences=12",
+        "processed_sentences=12",
+        "skipped_sentences=0",
+        "created_candidates=23",
+        "created_occurrences=92",
+        "episodes_touched=2",
+    ]
+    assert fake_service.pilot_name == "zack-10h-pilot"
+    assert fake_service.episode_id is None
+    assert fake_service.force is False
+
+    load_settings.cache_clear()
+
+
+def test_generate_candidates_episode_scope_calls_service(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateInventoryService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_inventory_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "generate-candidates",
+            "--episode-id",
+            "7",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "scope=episode" in result.stdout
+    assert "scope_value=7" in result.stdout
+    assert fake_service.pilot_name is None
+    assert fake_service.episode_id == 7
+    assert fake_service.force is False
+
+    load_settings.cache_clear()
+
+
+def test_generate_candidates_force_passthrough(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateInventoryService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_inventory_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "generate-candidates",
+            "--pilot",
+            "zack-10h-pilot",
+            "--force",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert fake_service.force is True
+
+    load_settings.cache_clear()
+
+
+def test_generate_candidates_without_scope_fails(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateInventoryService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_inventory_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(app, ["generate-candidates"])
+
+    assert result.exit_code == 1
+    assert "error=provide exactly one of pilot_name or episode_id" in result.stdout
+
+    load_settings.cache_clear()
+
+
+def test_generate_candidates_with_both_scopes_fails(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateInventoryService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_inventory_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "generate-candidates",
+            "--pilot",
+            "zack-10h-pilot",
+            "--episode-id",
+            "7",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "error=provide exactly one of pilot_name or episode_id" in result.stdout
 
     load_settings.cache_clear()

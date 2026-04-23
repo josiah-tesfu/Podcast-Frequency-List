@@ -452,6 +452,10 @@ Connect the span generator to the database.
 
 Scope:
 
+- add `INVENTORY_VERSION = "1"`
+- add `CandidateInventoryService`
+- add `CandidateInventoryError`
+- add `CandidateInventoryResult`
 - load tokenized sentences by pilot or episode scope
 - generate spans for selected sentences
 - upsert candidate rows
@@ -459,11 +463,195 @@ Scope:
 - support `--force` reruns for the selected scope
 - keep scoring out of scope
 
+Out of scope:
+
+- no CLI command yet
+- no ranking or scoring
+- no modal display-text selection pass
+- no show-scope or full-corpus CLI surface yet
+
+Recommended code shape:
+
+- keep `generate_sentence_spans(...)` in `tokens/spans.py`
+- add the persistence service in the `tokens` package beside tokenization
+- reuse `resolve_transcript_scope(...)` for pilot vs episode resolution
+- reuse current version constants from sentence/token stages when loading input rows
+
+Data contract for the service result:
+
+- `scope`
+- `scope_value`
+- `inventory_version`
+- `selected_sentences`
+- `processed_sentences`
+- `skipped_sentences`
+- `created_candidates`
+- `created_occurrences`
+- `episode_count`
+
+Implementation slices:
+
+1. Load current-version sentence targets
+
+- query `segment_sentences` only for `split_version = SPLIT_VERSION`
+- join `sentence_tokens` only for `tokenization_version = TOKENIZATION_VERSION`
+- do not read stale sentence rows from older split versions
+- do not read stale token rows from older tokenization versions
+- include per-sentence `existing_occurrence_count` for the current `inventory_version`
+- order pilot scope by `pilot_run_episodes.position`, `segment_id`, `sentence_index`, `token_index`
+- order episode scope by `segment_id`, `sentence_index`, `token_index`
+- fold the ordered rowset into one in-memory sentence object with ordered tokens
+- fail fast if the resolved scope has no current-version tokenized sentences
+
+2. Decide skip vs process before writing
+
+- default mode skips sentences where `existing_occurrence_count > 0` for the current `inventory_version`
+- processed sentences are the remainder of the selected scope
+- keep the skip decision at sentence granularity, not candidate granularity
+- count episodes touched from the selected sentence set, not from inserted rows only
+- make the zero-span edge case explicit: without a per-sentence marker table, sentences that emit zero valid spans will be recomputed on later default runs
+
+3. Generate spans in memory per sentence
+
+- call `generate_sentence_spans(...)` once per processed sentence
+- pass the sentence text and the already ordered `SentenceToken` rows
+- keep `max_ngram_size = 3` as the default
+- validate all span offsets before any inserts for that sentence
+- treat each sentence as the atomic work unit for emitted spans
+
+4. Upsert candidate rows deterministically
+
+- candidate identity is `(inventory_version, candidate_key)`
+- `display_text` in 2C is provisional; use the first-seen surface form from deterministic sentence order
+- do not add modal-surface logic here
+- `ngram_size` comes directly from the emitted span
+- create an in-memory cache keyed by `candidate_key` to avoid repeated candidate lookups inside the run
+- on conflict, keep the existing row and reuse its `candidate_id`
+- count only genuinely new rows in `created_candidates`
+
+5. Insert occurrence rows exactly once
+
+- insert one occurrence row per emitted span
+- always write `candidate_id`, `sentence_id`, `episode_id`, `segment_id`
+- always write `token_start_index`, `token_end_index`, `char_start`, `char_end`, `surface_text`
+- rely on the unique constraint `(inventory_version, sentence_id, token_start_index, token_end_index)` as the final duplicate guard
+- do not use `INSERT OR IGNORE`; duplicate attempts should fail loudly during development
+- `created_occurrences` should equal the emitted span count for processed sentences
+
+6. Recompute candidate frequency after occurrence writes
+
+- treat `raw_frequency` as a derived count from `token_occurrences`
+- do not try to increment and decrement `raw_frequency` inline across force rebuilds
+- after inserts, recompute `raw_frequency` from `token_occurrences` for the current `inventory_version`
+- recommended first pass: recompute the whole current inventory version in one SQL update
+- correctness is more important here than micro-optimizing small pilot runs
+
+7. Handle forced rebuilds safely
+
+- resolve the selected sentence IDs first
+- delete current-version occurrence rows for those sentence IDs only
+- rebuild only the selected scope
+- recompute `raw_frequency` after the rebuild
+- delete orphaned `token_candidates` rows for the current `inventory_version` after frequency recomputation
+- orphan cleanup must not touch rows from other inventory versions
+- forced pilot rebuild must not remove occurrences from episodes outside that pilot
+- forced episode rebuild must not remove occurrences from other episodes
+
+8. Keep the transaction model simple
+
+- use one DB transaction for the selected run
+- perform force-scope deletes, inserts, frequency recomputation, and orphan cleanup in that same transaction
+- commit only after the scope is internally coherent
+- let constraint failures abort the transaction rather than partially succeeding
+
 Rerun behavior:
 
-- default mode skips sentences already processed for the current inventory version
+- default mode skips sentences that already have current-version occurrences
 - `--force` deletes occurrence rows for the selected scope/version, then rebuilds them
 - orphaned candidates for the current inventory version are cleaned up after forced scoped rebuilds
+
+Recommended query shape:
+
+- one loader query for pilot scope
+- one loader query for episode scope
+- one delete statement for forced scope occurrence cleanup
+- one candidate upsert statement
+- one candidate lookup fallback statement
+- one occurrence insert statement
+- one `raw_frequency` recomputation statement
+- one orphan-candidate cleanup statement
+
+Recommended internal records:
+
+- `_CandidateInventorySentenceTarget`
+- fields: `sentence_id`, `episode_id`, `segment_id`, `sentence_text`, `tokens`, `existing_occurrence_count`
+
+Recommended validation queries during implementation:
+
+- occurrence count for current version:
+
+```sql
+SELECT COUNT(*)
+FROM token_occurrences
+WHERE inventory_version = ?;
+```
+
+- duplicate occurrence check:
+
+```sql
+SELECT inventory_version, sentence_id, token_start_index, token_end_index, COUNT(*) AS dup_count
+FROM token_occurrences
+WHERE inventory_version = ?
+GROUP BY inventory_version, sentence_id, token_start_index, token_end_index
+HAVING COUNT(*) > 1;
+```
+
+- offset/surface integrity check:
+
+```sql
+SELECT COUNT(*) AS mismatch_count
+FROM token_occurrences occ
+JOIN segment_sentences sent
+    ON sent.sentence_id = occ.sentence_id
+WHERE occ.inventory_version = ?
+AND occ.surface_text != substr(
+    sent.sentence_text,
+    occ.char_start + 1,
+    occ.char_end - occ.char_start
+);
+```
+
+- candidate frequency consistency check:
+
+```sql
+SELECT COUNT(*) AS mismatch_count
+FROM token_candidates cand
+LEFT JOIN (
+    SELECT candidate_id, inventory_version, COUNT(*) AS occurrence_count
+    FROM token_occurrences
+    WHERE inventory_version = ?
+    GROUP BY candidate_id, inventory_version
+) occ
+    ON occ.candidate_id = cand.candidate_id
+    AND occ.inventory_version = cand.inventory_version
+WHERE cand.inventory_version = ?
+AND cand.raw_frequency != COALESCE(occ.occurrence_count, 0);
+```
+
+- scope leakage check for pilot rebuilds:
+
+```sql
+SELECT COUNT(*) AS outside_scope_count
+FROM token_occurrences occ
+WHERE occ.inventory_version = ?
+AND occ.episode_id NOT IN (
+    SELECT pre.episode_id
+    FROM pilot_runs pr
+    JOIN pilot_run_episodes pre
+        ON pre.pilot_run_id = pr.pilot_run_id
+    WHERE pr.name = ?
+);
+```
 
 Validation:
 
@@ -472,6 +660,9 @@ Validation:
 - every occurrence has a valid candidate and sentence
 - all occurrence offsets match source sentence substrings
 - all occurrences belong to selected pilot/episode scope
+- candidate `raw_frequency` matches occurrence counts after every run
+- loader queries only use current split/tokenization versions
+- force rebuild leaves the selected scope internally identical on rerun
 
 Sanity checks:
 
@@ -479,6 +670,8 @@ Sanity checks:
 - examples show natural surface spans
 - counts are plausible by sentence count and token count
 - skipped/processed counts make rerun behavior obvious
+- candidates like `j ai`, `en fait`, `tu vois` collapse across repeated occurrences
+- forced rebuild of one episode does not change counts for untouched episodes
 
 Tests:
 
@@ -488,12 +681,35 @@ Tests:
 - forced rebuild
 - occurrence foreign-key links
 - offset integrity
+- current split/tokenization version filtering
+- `raw_frequency` recomputation
+- orphan-candidate cleanup after forced scoped rebuild
+
+Fixture design for tests:
+
+- at least two episodes in one show
+- one pilot that includes both episodes
+- sentence examples with apostrophes, numbers, and repeated chunks
+- at least one candidate shared across episodes
+- at least one candidate unique to one episode so force cleanup can prove orphan removal
+- at least one sentence that emits many spans so counts are nontrivial
+
+Suggested implementation order:
+
+1. add result/error/version types
+2. add scope loaders that return sentence targets with ordered tokens
+3. add pure per-sentence persistence helper: spans in, candidate IDs out, occurrences written
+4. add run-level frequency recomputation
+5. add `--force` scoped delete + orphan cleanup
+6. add tests before any CLI work
 
 Exit criteria:
 
 - inventory generation works on a small fixture DB
 - full test suite passes
 - no scoring columns or ranking logic added here
+- force rebuild is deterministic for pilot and episode scopes
+- DB validation queries above return zero mismatches
 
 #### Step 2D: CLI And Reporting
 
@@ -515,13 +731,12 @@ Output should include:
 - selected sentences
 - processed sentences
 - skipped sentences
-- created/updated candidates
+- created_candidates
 - created occurrences
 - episodes touched
 
 Validation:
 
-- CLI validates mutually exclusive scope flags
 - CLI returns nonzero on invalid scope
 - output is stable and script-readable
 - docs explain normal run vs forced rerun
