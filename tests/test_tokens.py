@@ -217,3 +217,54 @@ def test_sentence_tokenization_service_requires_exactly_one_scope(tmp_path) -> N
         assert "exactly one" in str(exc)
     else:
         raise AssertionError("expected SentenceTokenizationError")
+
+
+def test_sentence_tokenization_service_ignores_stale_split_versions(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    episode_id, sentence_ids = _seed_tokenization_data(db_path)
+    service = SentenceTokenizationService(db_path=db_path)
+
+    with connect(db_path) as connection:
+        segment_id = connection.execute(
+            """
+            SELECT segment_id
+            FROM segment_sentences
+            WHERE sentence_id = ?
+            """,
+            (sentence_ids[0],),
+        ).fetchone()["segment_id"]
+        stale_sentence_text = "Ancien split ignoré."
+        stale_sentence_id = int(
+            connection.execute(
+                """
+                INSERT INTO segment_sentences (
+                    segment_id,
+                    episode_id,
+                    split_version,
+                    sentence_index,
+                    char_start,
+                    char_end,
+                    sentence_text
+                )
+                VALUES (?, ?, '0', 99, 0, ?, ?)
+                """,
+                (segment_id, episode_id, len(stale_sentence_text), stale_sentence_text),
+            ).lastrowid
+        )
+        connection.commit()
+
+    result = service.tokenize(episode_id=episode_id)
+
+    with connect(db_path) as connection:
+        stale_token_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM sentence_tokens
+            WHERE sentence_id = ?
+            """,
+            (stale_sentence_id,),
+        ).fetchone()[0]
+
+    assert result.selected_sentences == 2
+    assert result.tokenized_sentences == 2
+    assert stale_token_count == 0

@@ -38,3 +38,16 @@ class TokenizationResult:
     created_tokens: int
     skipped_sentences: int
     episode_count: int
+
+
+@dataclass(frozen=True)
+class CandidateInventoryResult:
+    scope: str
+    scope_value: str
+    inventory_version: str
+    selected_sentences: int
+    processed_sentences: int
+    skipped_sentences: int
+    created_candidates: int
+    created_occurrences: int
+    episode_count: int

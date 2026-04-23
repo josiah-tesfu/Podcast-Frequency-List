@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from podcast_frequency_list.db import connect
+from podcast_frequency_list.sentences.service import SPLIT_VERSION
 from podcast_frequency_list.tokens.models import TokenizationResult
 from podcast_frequency_list.tokens.tokenizer import tokenize_sentence_text
 from podcast_frequency_list.transcript_scope import resolve_transcript_scope
@@ -142,6 +143,7 @@ class SentenceTokenizationService:
                         ON st.sentence_id = ss.sentence_id
                         AND st.tokenization_version = ?
                     WHERE pr.name = ?
+                    AND ss.split_version = ?
                     GROUP BY
                         ss.sentence_id,
                         ss.episode_id,
@@ -151,7 +153,7 @@ class SentenceTokenizationService:
                         ss.sentence_index
                     ORDER BY pre.position, ss.segment_id, ss.sentence_index
                     """,
-                    (TOKENIZATION_VERSION, pilot_name),
+                    (TOKENIZATION_VERSION, pilot_name, SPLIT_VERSION),
                 ).fetchall()
             else:
                 rows = connection.execute(
@@ -167,6 +169,7 @@ class SentenceTokenizationService:
                         ON st.sentence_id = ss.sentence_id
                         AND st.tokenization_version = ?
                     WHERE ss.episode_id = ?
+                    AND ss.split_version = ?
                     GROUP BY
                         ss.sentence_id,
                         ss.episode_id,
@@ -175,7 +178,7 @@ class SentenceTokenizationService:
                         ss.sentence_index
                     ORDER BY ss.segment_id, ss.sentence_index
                     """,
-                    (TOKENIZATION_VERSION, episode_id),
+                    (TOKENIZATION_VERSION, episode_id, SPLIT_VERSION),
                 ).fetchall()
 
         return [
