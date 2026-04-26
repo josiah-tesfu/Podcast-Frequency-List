@@ -77,6 +77,7 @@ def _emit_top_candidates(
             rows,
             record_type=f"top_{ngram_size}gram",
             include_step4=ngram_size >= 2,
+            include_step5=ngram_size <= 2,
         )
 
 
@@ -97,6 +98,7 @@ def _emit_focus_candidates(
         matched_rows,
         record_type="focus_candidate",
         include_step4=True,
+        include_step5=True,
     )
     emit_fields((("focus_missing_count", len(missing_keys)),))
     for missing_key in missing_keys:

@@ -100,6 +100,7 @@ def emit_candidate_rows(
     *,
     record_type: str,
     include_step4: bool = False,
+    include_step5: bool = False,
 ) -> None:
     for rank, row in enumerate(rows, start=1):
         fields: list[tuple[str, object]] = [
@@ -127,6 +128,43 @@ def emit_candidate_rows(
                     ),
                     ("left_entropy", _optional_metric_value(row.left_entropy)),
                     ("right_entropy", _optional_metric_value(row.right_entropy)),
+                ]
+            )
+        if include_step5:
+            fields.extend(
+                [
+                    (
+                        "covered_by_any_count",
+                        _optional_metric_value(row.covered_by_any_count),
+                    ),
+                    (
+                        "covered_by_any_ratio",
+                        _optional_metric_value(row.covered_by_any_ratio),
+                    ),
+                    (
+                        "independent_occurrence_count",
+                        _optional_metric_value(row.independent_occurrence_count),
+                    ),
+                    (
+                        "direct_parent_count",
+                        _optional_metric_value(row.direct_parent_count),
+                    ),
+                    (
+                        "dominant_parent_key",
+                        _optional_metric_value(row.dominant_parent_key),
+                    ),
+                    (
+                        "dominant_parent_shared_count",
+                        _optional_metric_value(row.dominant_parent_shared_count),
+                    ),
+                    (
+                        "dominant_parent_share",
+                        _optional_metric_value(row.dominant_parent_share),
+                    ),
+                    (
+                        "dominant_parent_side",
+                        _optional_metric_value(row.dominant_parent_side),
+                    ),
                 ]
             )
         emit_record(fields)

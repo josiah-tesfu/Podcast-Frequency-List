@@ -503,9 +503,11 @@ Output:
 - show dispersion mismatch count
 - display text mismatch count
 - foreign key issue count
-- top 1-gram rows with frequency and dispersion
-- top 2/3-gram rows with frequency, dispersion, association, and boundary metrics
-- matching focus rows with association and boundary metrics plus missing requested keys
+- top 1-gram rows with frequency, dispersion, and Step 5 coverage/dominance fields
+- top 2-gram rows with frequency, dispersion, association, boundary, and Step 5
+  coverage/dominance fields
+- top 3-gram rows with frequency, dispersion, association, and boundary metrics
+- matching focus rows with Step 4 and Step 5 fields plus missing requested keys
 
 How to use it:
 - run after `refresh-candidate-metrics`

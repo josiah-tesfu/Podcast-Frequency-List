@@ -1746,6 +1746,14 @@ def test_candidate_metrics_service_lists_top_candidates_by_ngram(tmp_path) -> No
     assert rows[0].right_context_type_count == 3
     assert rows[0].left_entropy == 0.4
     assert rows[0].right_entropy == 0.8
+    assert rows[0].covered_by_any_count == 0
+    assert rows[0].covered_by_any_ratio == pytest.approx(0.0)
+    assert rows[0].independent_occurrence_count == 10
+    assert rows[0].direct_parent_count == 0
+    assert rows[0].dominant_parent_key is None
+    assert rows[0].dominant_parent_shared_count is None
+    assert rows[0].dominant_parent_share is None
+    assert rows[0].dominant_parent_side is None
 
 
 def test_candidate_metrics_service_summary_empty_bucket_returns_empty_tuple(tmp_path) -> None:
@@ -1892,6 +1900,111 @@ def test_candidate_metrics_service_validate_reports_clean_state_after_refresh(tm
     )
 
 
+def test_candidate_metrics_service_lists_candidates_with_step5_summary_fields(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        envie_id = _insert_candidate(
+            connection,
+            candidate_key="envie",
+            display_text="envie",
+            ngram_size=1,
+        )
+        ai_envie_id = _insert_candidate(
+            connection,
+            candidate_key="ai envie",
+            display_text="ai envie",
+            ngram_size=2,
+        )
+        envie_de_id = _insert_candidate(
+            connection,
+            candidate_key="envie de",
+            display_text="envie de",
+            ngram_size=2,
+        )
+        j_ai_envie_id = _insert_candidate(
+            connection,
+            candidate_key="j ai envie",
+            display_text="j ai envie",
+            ngram_size=3,
+        )
+        ai_envie_de_id = _insert_candidate(
+            connection,
+            candidate_key="ai envie de",
+            display_text="ai envie de",
+            ngram_size=3,
+        )
+
+        for index in range(2):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid="ep-shared",
+                sentence_text="j ai envie",
+                source_model=f"test-model-{index}",
+                occurrences=(
+                    (envie_id, 2, 3, 5, 10, "envie"),
+                    (ai_envie_id, 1, 3, 2, 10, "ai envie"),
+                    (j_ai_envie_id, 0, 3, 0, 10, "j ai envie"),
+                ),
+            )
+
+        _insert_occurrence_bundle(
+            connection,
+            show_id=show_id,
+            guid="ep-other",
+            sentence_text="ai envie de",
+            occurrences=(
+                (envie_id, 1, 2, 3, 8, "envie"),
+                (ai_envie_id, 0, 2, 0, 8, "ai envie"),
+                (envie_de_id, 1, 3, 3, 11, "envie de"),
+                (ai_envie_de_id, 0, 3, 0, 11, "ai envie de"),
+            ),
+        )
+        connection.commit()
+
+    service = CandidateMetricsService(db_path=db_path)
+    service.refresh()
+    rows = service.list_candidates_by_key(
+        candidate_keys=("j ai envie", "envie", "ai envie"),
+    )
+
+    assert [row.candidate_key for row in rows] == ["j ai envie", "envie", "ai envie"]
+
+    assert rows[0].covered_by_any_count is None
+    assert rows[0].covered_by_any_ratio is None
+    assert rows[0].independent_occurrence_count is None
+    assert rows[0].direct_parent_count is None
+    assert rows[0].dominant_parent_key is None
+    assert rows[0].dominant_parent_shared_count is None
+    assert rows[0].dominant_parent_share is None
+    assert rows[0].dominant_parent_side is None
+
+    assert rows[1].covered_by_any_count == 3
+    assert rows[1].covered_by_any_ratio == pytest.approx(1.0)
+    assert rows[1].independent_occurrence_count == 0
+    assert rows[1].direct_parent_count == 2
+    assert rows[1].dominant_parent_key == "ai envie"
+    assert rows[1].dominant_parent_shared_count == 3
+    assert rows[1].dominant_parent_share == pytest.approx(1.0)
+    assert rows[1].dominant_parent_side == "left"
+
+    assert rows[2].covered_by_any_count == 3
+    assert rows[2].covered_by_any_ratio == pytest.approx(1.0)
+    assert rows[2].independent_occurrence_count == 0
+    assert rows[2].direct_parent_count == 2
+    assert rows[2].dominant_parent_key == "j ai envie"
+    assert rows[2].dominant_parent_shared_count == 2
+    assert rows[2].dominant_parent_share == pytest.approx(2 / 3)
+    assert rows[2].dominant_parent_side == "left"
+
+
 def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tmp_path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)
@@ -1951,5 +2064,17 @@ def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tm
     assert rows[0].right_context_type_count == 5
     assert rows[0].left_entropy == 0.25
     assert rows[0].right_entropy == 1.4
+    assert rows[0].covered_by_any_count is None
+    assert rows[0].covered_by_any_ratio is None
+    assert rows[0].independent_occurrence_count is None
+    assert rows[0].direct_parent_count is None
     assert rows[1].t_score == 5.25
     assert rows[1].npmi == 0.83
+    assert rows[1].covered_by_any_count == 0
+    assert rows[1].covered_by_any_ratio == pytest.approx(0.0)
+    assert rows[1].independent_occurrence_count == 9
+    assert rows[1].direct_parent_count == 0
+    assert rows[1].dominant_parent_key is None
+    assert rows[1].dominant_parent_shared_count is None
+    assert rows[1].dominant_parent_share is None
+    assert rows[1].dominant_parent_side is None

@@ -359,6 +359,14 @@ class FakeCandidateMetricsService:
                 right_context_type_count=None if ngram_size == 1 else ngram_size + 1,
                 left_entropy=None if ngram_size == 1 else 0.2 * ngram_size,
                 right_entropy=None if ngram_size == 1 else 0.3 * ngram_size,
+                covered_by_any_count=None if ngram_size == 3 else ngram_size,
+                covered_by_any_ratio=None if ngram_size == 3 else 0.25 * ngram_size,
+                independent_occurrence_count=None if ngram_size == 3 else 9 * ngram_size,
+                direct_parent_count=None if ngram_size == 3 else ngram_size + 1,
+                dominant_parent_key=None if ngram_size == 3 else f"parent-{ngram_size}",
+                dominant_parent_shared_count=None if ngram_size == 3 else ngram_size + 2,
+                dominant_parent_share=None if ngram_size == 3 else 0.15 * ngram_size,
+                dominant_parent_side=None if ngram_size == 3 else "left",
             ),
         )
 
@@ -389,6 +397,14 @@ class FakeCandidateMetricsService:
                     right_context_type_count=3 if len(key.split()) >= 2 else None,
                     left_entropy=0.41 if len(key.split()) >= 2 else None,
                     right_entropy=0.92 if len(key.split()) >= 2 else None,
+                    covered_by_any_count=4 if len(key.split()) < 3 else None,
+                    covered_by_any_ratio=0.57 if len(key.split()) < 3 else None,
+                    independent_occurrence_count=3 if len(key.split()) < 3 else None,
+                    direct_parent_count=2 if len(key.split()) < 3 else None,
+                    dominant_parent_key="je en fait" if len(key.split()) < 3 else None,
+                    dominant_parent_shared_count=3 if len(key.split()) < 3 else None,
+                    dominant_parent_share=0.43 if len(key.split()) < 3 else None,
+                    dominant_parent_side="left" if len(key.split()) < 3 else None,
                 )
             )
         return tuple(rows)
@@ -898,17 +914,34 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
     assert "top_candidate_count_2gram=1" in result.stdout
     assert "top_candidate_count_3gram=1" in result.stdout
     assert (
+        "record=top_1gram\trank=1\tcandidate_key=candidate-1\tdisplay_text=candidate 1"
+        "\tngram_size=1\traw_frequency=10\tepisode_dispersion=2\tshow_dispersion=1"
+        "\tcovered_by_any_count=1\tcovered_by_any_ratio=0.25"
+        "\tindependent_occurrence_count=9\tdirect_parent_count=2"
+        "\tdominant_parent_key=parent-1\tdominant_parent_shared_count=3"
+        "\tdominant_parent_share=0.15\tdominant_parent_side=left"
+        in result.stdout
+    )
+    assert (
         "record=top_2gram\trank=1\tcandidate_key=candidate-2\tdisplay_text=candidate 2"
         "\tngram_size=2\traw_frequency=20\tepisode_dispersion=3\tshow_dispersion=1"
         "\tt_score=5.0\tnpmi=0.7\tleft_context_type_count=2\tright_context_type_count=3"
-        "\tleft_entropy=0.4\tright_entropy=0.6"
+        "\tleft_entropy=0.4\tright_entropy=0.6\tcovered_by_any_count=2"
+        "\tcovered_by_any_ratio=0.5\tindependent_occurrence_count=18"
+        "\tdirect_parent_count=3\tdominant_parent_key=parent-2"
+        "\tdominant_parent_shared_count=4\tdominant_parent_share=0.3"
+        "\tdominant_parent_side=left"
         in result.stdout
     )
     assert (
         "record=focus_candidate\trank=1\tcandidate_key=en fait\tdisplay_text=en fait"
         "\tngram_size=2\traw_frequency=7\tepisode_dispersion=3\tshow_dispersion=1"
         "\tt_score=4.2\tnpmi=0.77\tleft_context_type_count=2\tright_context_type_count=3"
-        "\tleft_entropy=0.41\tright_entropy=0.92"
+        "\tleft_entropy=0.41\tright_entropy=0.92\tcovered_by_any_count=4"
+        "\tcovered_by_any_ratio=0.57\tindependent_occurrence_count=3"
+        "\tdirect_parent_count=2\tdominant_parent_key=je en fait"
+        "\tdominant_parent_shared_count=3\tdominant_parent_share=0.43"
+        "\tdominant_parent_side=left"
         in result.stdout
     )
     assert "focus_missing_count=1" in result.stdout

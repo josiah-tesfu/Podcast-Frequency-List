@@ -92,3 +92,11 @@ class CandidateSummaryRow:
     right_context_type_count: int | None = None
     left_entropy: float | None = None
     right_entropy: float | None = None
+    covered_by_any_count: int | None = None
+    covered_by_any_ratio: float | None = None
+    independent_occurrence_count: int | None = None
+    direct_parent_count: int | None = None
+    dominant_parent_key: str | None = None
+    dominant_parent_shared_count: int | None = None
+    dominant_parent_share: float | None = None
+    dominant_parent_side: str | None = None
