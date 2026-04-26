@@ -444,6 +444,7 @@ What it does:
 - recomputes stored candidate metrics from `token_occurrences`
 - deletes current-version orphan candidates with no occurrence evidence
 - refreshes deterministic `display_text`
+- refreshes stored Step 4 association and boundary facts for multiword candidates
 
 Command:
 
@@ -456,6 +457,12 @@ What changes:
 - updates `episode_dispersion`
 - updates `show_dispersion`
 - updates `display_text`
+- updates `t_score`
+- updates `npmi`
+- updates `left_context_type_count`
+- updates `right_context_type_count`
+- updates `left_entropy`
+- updates `right_entropy`
 
 Output:
 - inventory version
@@ -496,8 +503,9 @@ Output:
 - show dispersion mismatch count
 - display text mismatch count
 - foreign key issue count
-- top 1/2/3-gram rows with frequency and dispersion
-- matching focus rows plus missing requested keys
+- top 1-gram rows with frequency and dispersion
+- top 2/3-gram rows with frequency, dispersion, association, and boundary metrics
+- matching focus rows with association and boundary metrics plus missing requested keys
 
 How to use it:
 - run after `refresh-candidate-metrics`

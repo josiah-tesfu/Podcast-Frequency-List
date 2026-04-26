@@ -353,6 +353,12 @@ class FakeCandidateMetricsService:
                 raw_frequency=10 * ngram_size,
                 episode_dispersion=ngram_size + 1,
                 show_dispersion=1,
+                t_score=None if ngram_size == 1 else 2.5 * ngram_size,
+                npmi=None if ngram_size == 1 else 0.5 + (0.1 * ngram_size),
+                left_context_type_count=None if ngram_size == 1 else ngram_size,
+                right_context_type_count=None if ngram_size == 1 else ngram_size + 1,
+                left_entropy=None if ngram_size == 1 else 0.2 * ngram_size,
+                right_entropy=None if ngram_size == 1 else 0.3 * ngram_size,
             ),
         )
 
@@ -377,6 +383,12 @@ class FakeCandidateMetricsService:
                     raw_frequency=7,
                     episode_dispersion=3,
                     show_dispersion=1,
+                    t_score=4.2 if len(key.split()) >= 2 else None,
+                    npmi=0.77 if len(key.split()) >= 2 else None,
+                    left_context_type_count=2 if len(key.split()) >= 2 else None,
+                    right_context_type_count=3 if len(key.split()) >= 2 else None,
+                    left_entropy=0.41 if len(key.split()) >= 2 else None,
+                    right_entropy=0.92 if len(key.split()) >= 2 else None,
                 )
             )
         return tuple(rows)
@@ -887,10 +899,16 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
     assert "top_candidate_count_3gram=1" in result.stdout
     assert (
         "record=top_2gram\trank=1\tcandidate_key=candidate-2\tdisplay_text=candidate 2"
+        "\tngram_size=2\traw_frequency=20\tepisode_dispersion=3\tshow_dispersion=1"
+        "\tt_score=5.0\tnpmi=0.7\tleft_context_type_count=2\tright_context_type_count=3"
+        "\tleft_entropy=0.4\tright_entropy=0.6"
         in result.stdout
     )
     assert (
         "record=focus_candidate\trank=1\tcandidate_key=en fait\tdisplay_text=en fait"
+        "\tngram_size=2\traw_frequency=7\tepisode_dispersion=3\tshow_dispersion=1"
+        "\tt_score=4.2\tnpmi=0.77\tleft_context_type_count=2\tright_context_type_count=3"
+        "\tleft_entropy=0.41\tright_entropy=0.92"
         in result.stdout
     )
     assert "focus_missing_count=1" in result.stdout

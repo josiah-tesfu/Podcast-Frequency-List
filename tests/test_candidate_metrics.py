@@ -97,6 +97,12 @@ def _insert_candidate(
     raw_frequency: int = 99,
     episode_dispersion: int = 99,
     show_dispersion: int = 99,
+    t_score: float | None = None,
+    npmi: float | None = None,
+    left_context_type_count: int | None = None,
+    right_context_type_count: int | None = None,
+    left_entropy: float | None = None,
+    right_entropy: float | None = None,
 ) -> int:
     return int(
         connection.execute(
@@ -108,9 +114,15 @@ def _insert_candidate(
                 ngram_size,
                 raw_frequency,
                 episode_dispersion,
-                show_dispersion
+                show_dispersion,
+                t_score,
+                npmi,
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 inventory_version,
@@ -120,6 +132,12 @@ def _insert_candidate(
                 raw_frequency,
                 episode_dispersion,
                 show_dispersion,
+                t_score,
+                npmi,
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy,
             ),
         ).lastrowid
     )
@@ -1176,6 +1194,12 @@ def test_candidate_metrics_service_lists_top_candidates_by_ngram(tmp_path) -> No
             raw_frequency=10,
             episode_dispersion=3,
             show_dispersion=1,
+            t_score=4.5,
+            npmi=0.7,
+            left_context_type_count=2,
+            right_context_type_count=3,
+            left_entropy=0.4,
+            right_entropy=0.8,
         )
         _insert_candidate(
             connection,
@@ -1218,6 +1242,12 @@ def test_candidate_metrics_service_lists_top_candidates_by_ngram(tmp_path) -> No
     assert rows[0].raw_frequency == 10
     assert rows[0].episode_dispersion == 3
     assert rows[0].show_dispersion == 1
+    assert rows[0].t_score == 4.5
+    assert rows[0].npmi == 0.7
+    assert rows[0].left_context_type_count == 2
+    assert rows[0].right_context_type_count == 3
+    assert rows[0].left_entropy == 0.4
+    assert rows[0].right_entropy == 0.8
 
 
 def test_candidate_metrics_service_summary_empty_bucket_returns_empty_tuple(tmp_path) -> None:
@@ -1386,6 +1416,12 @@ def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tm
             raw_frequency=9,
             episode_dispersion=5,
             show_dispersion=2,
+            t_score=5.25,
+            npmi=0.83,
+            left_context_type_count=4,
+            right_context_type_count=2,
+            left_entropy=1.2,
+            right_entropy=0.35,
         )
         _insert_candidate(
             connection,
@@ -1395,6 +1431,12 @@ def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tm
             raw_frequency=8,
             episode_dispersion=6,
             show_dispersion=3,
+            t_score=3.1,
+            npmi=0.61,
+            left_context_type_count=2,
+            right_context_type_count=5,
+            left_entropy=0.25,
+            right_entropy=1.4,
         )
         connection.commit()
 
@@ -1405,3 +1447,11 @@ def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tm
     assert [row.candidate_key for row in rows] == ["il y a", "du coup"]
     assert rows[0].display_text == "il y a"
     assert rows[1].raw_frequency == 9
+    assert rows[0].t_score == 3.1
+    assert rows[0].npmi == 0.61
+    assert rows[0].left_context_type_count == 2
+    assert rows[0].right_context_type_count == 5
+    assert rows[0].left_entropy == 0.25
+    assert rows[0].right_entropy == 1.4
+    assert rows[1].t_score == 5.25
+    assert rows[1].npmi == 0.83

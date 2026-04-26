@@ -73,7 +73,11 @@ def _emit_top_candidates(
     for ngram_size in (1, 2, 3):
         rows = service.list_top_candidates(ngram_size=ngram_size, limit=limit)
         emit_fields(((f"top_candidate_count_{ngram_size}gram", len(rows)),))
-        emit_candidate_rows(rows, record_type=f"top_{ngram_size}gram")
+        emit_candidate_rows(
+            rows,
+            record_type=f"top_{ngram_size}gram",
+            include_step4=ngram_size >= 2,
+        )
 
 
 def _emit_focus_candidates(
@@ -89,7 +93,11 @@ def _emit_focus_candidates(
     missing_keys = tuple(key for key in inspection_keys if key not in matched_keys)
 
     emit_fields((("focus_candidate_count", len(matched_rows)),))
-    emit_candidate_rows(matched_rows, record_type="focus_candidate")
+    emit_candidate_rows(
+        matched_rows,
+        record_type="focus_candidate",
+        include_step4=True,
+    )
     emit_fields((("focus_missing_count", len(missing_keys)),))
     for missing_key in missing_keys:
         emit_fields((("focus_missing", missing_key),))

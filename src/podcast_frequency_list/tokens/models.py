@@ -86,3 +86,9 @@ class CandidateSummaryRow:
     raw_frequency: int
     episode_dispersion: int
     show_dispersion: int
+    t_score: float | None = None
+    npmi: float | None = None
+    left_context_type_count: int | None = None
+    right_context_type_count: int | None = None
+    left_entropy: float | None = None
+    right_entropy: float | None = None

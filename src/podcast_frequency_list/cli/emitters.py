@@ -99,20 +99,37 @@ def emit_candidate_rows(
     rows: tuple[CandidateSummaryRow, ...],
     *,
     record_type: str,
+    include_step4: bool = False,
 ) -> None:
     for rank, row in enumerate(rows, start=1):
-        emit_record(
-            (
-                ("record", record_type),
-                ("rank", rank),
-                ("candidate_key", row.candidate_key),
-                ("display_text", row.display_text),
-                ("ngram_size", row.ngram_size),
-                ("raw_frequency", row.raw_frequency),
-                ("episode_dispersion", row.episode_dispersion),
-                ("show_dispersion", row.show_dispersion),
+        fields: list[tuple[str, object]] = [
+            ("record", record_type),
+            ("rank", rank),
+            ("candidate_key", row.candidate_key),
+            ("display_text", row.display_text),
+            ("ngram_size", row.ngram_size),
+            ("raw_frequency", row.raw_frequency),
+            ("episode_dispersion", row.episode_dispersion),
+            ("show_dispersion", row.show_dispersion),
+        ]
+        if include_step4:
+            fields.extend(
+                [
+                    ("t_score", _optional_metric_value(row.t_score)),
+                    ("npmi", _optional_metric_value(row.npmi)),
+                    (
+                        "left_context_type_count",
+                        _optional_metric_value(row.left_context_type_count),
+                    ),
+                    (
+                        "right_context_type_count",
+                        _optional_metric_value(row.right_context_type_count),
+                    ),
+                    ("left_entropy", _optional_metric_value(row.left_entropy)),
+                    ("right_entropy", _optional_metric_value(row.right_entropy)),
+                ]
             )
-        )
+        emit_record(fields)
 
 
 def _emit_result_fields(result: object, field_specs: tuple[FieldSpec, ...]) -> None:
@@ -128,3 +145,7 @@ def _resolve_field_value(result: object, field_source: FieldSource) -> object:
     if isinstance(field_source, str):
         return getattr(result, field_source)
     return field_source(result)
+
+
+def _optional_metric_value(value: object | None) -> object:
+    return "-" if value is None else value

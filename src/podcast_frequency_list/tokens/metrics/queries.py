@@ -11,7 +11,13 @@ _SUMMARY_COLUMNS_SQL = """
     ngram_size,
     raw_frequency,
     episode_dispersion,
-    show_dispersion
+    show_dispersion,
+    t_score,
+    npmi,
+    left_context_type_count,
+    right_context_type_count,
+    left_entropy,
+    right_entropy
 """
 _SUMMARY_ORDER_SQL = "raw_frequency DESC, episode_dispersion DESC, candidate_key"
 
@@ -108,8 +114,24 @@ def _row_to_summary(row: Row) -> CandidateSummaryRow:
         raw_frequency=int(row["raw_frequency"]),
         episode_dispersion=int(row["episode_dispersion"]),
         show_dispersion=int(row["show_dispersion"]),
+        t_score=_row_float(row, "t_score"),
+        npmi=_row_float(row, "npmi"),
+        left_context_type_count=_row_int(row, "left_context_type_count"),
+        right_context_type_count=_row_int(row, "right_context_type_count"),
+        left_entropy=_row_float(row, "left_entropy"),
+        right_entropy=_row_float(row, "right_entropy"),
     )
 
 
 def _sql_placeholders(count: int) -> str:
     return ", ".join("?" for _ in range(count))
+
+
+def _row_float(row: Row, column_name: str) -> float | None:
+    value = row[column_name]
+    return None if value is None else float(value)
+
+
+def _row_int(row: Row, column_name: str) -> int | None:
+    value = row[column_name]
+    return None if value is None else int(value)
