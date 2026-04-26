@@ -7,6 +7,7 @@ from podcast_frequency_list.tokens.models import (
     CandidateMetricsValidationResult,
 )
 
+from .association import _AssociationStore
 from .boundary import _BoundaryStore
 from .display import _DisplayStore
 from .store import _MetricsStore
@@ -23,6 +24,10 @@ class _CandidateMetricsWorkflow:
         self.connection = connection
         self.inventory_version = inventory_version
         self.metric_store = _MetricsStore(
+            connection=connection,
+            inventory_version=inventory_version,
+        )
+        self.association_store = _AssociationStore(
             connection=connection,
             inventory_version=inventory_version,
         )
@@ -60,6 +65,7 @@ class _CandidateMetricsWorkflow:
             inventory_version=self.inventory_version,
         )
         self.metric_store.refresh()
+        self.association_store.refresh()
         self.boundary_store.refresh()
         display_text_updates = self.display_store.refresh()
         summary = self.metric_store.load_summary()
