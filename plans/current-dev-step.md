@@ -1,6 +1,6 @@
-Current step: tokenization foundation.
+Current step: association and boundary features.
 
 Notes:
-- Convert `segment_sentences` into `sentence_tokens`.
-- Preserve offsets and surface text.
-- Status: implemented and sanity-checked on `zack-10h-pilot`.
+- Step 3 candidate metrics are implemented and inspectable.
+- Stored raw frequency, episode dispersion, show dispersion, and display text can be validated directly.
+- Next work: Step 4 unithood metrics on the stable candidate set.

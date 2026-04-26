@@ -813,12 +813,347 @@ Deliverables:
 
 - raw frequency
 - episode dispersion
+- show dispersion
 - basic display-form selection
 - basic candidate summary query
 
 Output:
 
 - inspectable top 1/2/3-grams
+
+Step 3 should not be implemented as one broad pass.
+
+The frequency and dispersion math is deterministic, but the stage touches
+schema, migration, derived metric ownership, display-form policy, and reporting.
+Those are separate enough that splitting keeps the work reviewable and prevents
+premature scoring logic from leaking in.
+
+Deterministic parts:
+
+- `raw_frequency = COUNT(token_occurrences)`
+- `episode_dispersion = COUNT(DISTINCT episode_id)`
+- `show_dispersion = COUNT(DISTINCT show_id)`
+- summary queries ordered by stored metrics
+- DB validation queries
+
+Policy-driven but still deterministic after selection:
+
+- `display_text` selection from observed occurrence surfaces
+
+Out of scope for Step 3:
+
+- score weights
+- threshold tuning
+- association metrics
+- boundary entropy
+- redundancy suppression
+- `candidate_scores`
+- ranking beyond simple metric-sorted summaries
+
+#### Step 3A: Metrics Schema
+
+Add storage for factual candidate metrics.
+
+Scope:
+
+- add `episode_dispersion INTEGER NOT NULL DEFAULT 0` to `token_candidates`
+- add `show_dispersion INTEGER NOT NULL DEFAULT 0` to `token_candidates`
+- keep `raw_frequency` on `token_candidates`
+- keep `display_text` on `token_candidates`
+- bump `SCHEMA_VERSION`
+- support existing DB migration with `ALTER TABLE` when columns are missing
+- no scoring table
+- no ranking logic
+- no CLI command yet
+
+Reason:
+
+- metrics are facts derived directly from `token_occurrences`
+- storing them beside `raw_frequency` avoids a parallel metrics abstraction
+- later scoring can read stable candidate facts without recomputing counts
+
+Validation:
+
+- fresh DB contains both new columns
+- existing schema version 9 DB upgrades cleanly
+- `PRAGMA foreign_key_check` returns no rows
+- existing candidate rows receive default zero values before refresh
+- indexes still support inventory and frequency queries
+
+Sanity checks:
+
+- `token_candidates` still has one row per `(inventory_version, candidate_key)`
+- no candidate rows are created or deleted by schema migration
+- no occurrence rows are changed by schema migration
+
+Tests:
+
+- fresh DB schema test
+- legacy DB migration test from v9 shape
+- schema version test
+- foreign-key integrity test
+
+Exit criteria:
+
+- schema-only change is green
+- full test suite passes
+- no metric refresh logic included yet
+
+#### Step 3B: Metrics Refresh Service
+
+Recompute stored candidate facts from occurrence evidence.
+
+Scope:
+
+- add a deterministic metrics refresh service in the `tokens` package
+- refresh metrics for one `inventory_version`
+- recompute `raw_frequency`
+- recompute `episode_dispersion`
+- recompute `show_dispersion`
+- recompute `display_text`
+- keep all updates in one transaction
+- clean up orphan candidates if needed, consistent with Step 2 behavior
+- no ranking scores
+- no association metrics
+
+Recommended code shape:
+
+- add `CandidateMetricsService`
+- add `CandidateMetricsError`
+- add `CandidateMetricsResult`
+- keep service near `tokens/inventory.py`
+- reuse `INVENTORY_VERSION`
+- keep SQL set-based where possible
+
+Display-form policy:
+
+1. choose the most frequent observed `surface_text` for the candidate
+2. tie-break toward the form whose first character is lowercase
+3. tie-break by earliest `occurrence_id`
+
+Reason:
+
+- Step 2 uses first-seen display text as a provisional value
+- Step 3 can replace that with evidence-backed modal surface text
+- capitalization from sentence starts should not dominate ties
+- the policy is deterministic and easy to validate
+
+Required metric definitions:
+
+```sql
+raw_frequency = COUNT(token_occurrences)
+episode_dispersion = COUNT(DISTINCT token_occurrences.episode_id)
+show_dispersion = COUNT(DISTINCT episodes.show_id)
+```
+
+Validation queries:
+
+- raw frequency mismatch:
+
+```sql
+SELECT COUNT(*) AS mismatch_count
+FROM token_candidates cand
+LEFT JOIN (
+    SELECT candidate_id, inventory_version, COUNT(*) AS occurrence_count
+    FROM token_occurrences
+    WHERE inventory_version = ?
+    GROUP BY candidate_id, inventory_version
+) occ
+    ON occ.candidate_id = cand.candidate_id
+    AND occ.inventory_version = cand.inventory_version
+WHERE cand.inventory_version = ?
+AND cand.raw_frequency != COALESCE(occ.occurrence_count, 0);
+```
+
+- episode dispersion mismatch:
+
+```sql
+SELECT COUNT(*) AS mismatch_count
+FROM token_candidates cand
+LEFT JOIN (
+    SELECT candidate_id, inventory_version, COUNT(DISTINCT episode_id) AS episode_count
+    FROM token_occurrences
+    WHERE inventory_version = ?
+    GROUP BY candidate_id, inventory_version
+) occ
+    ON occ.candidate_id = cand.candidate_id
+    AND occ.inventory_version = cand.inventory_version
+WHERE cand.inventory_version = ?
+AND cand.episode_dispersion != COALESCE(occ.episode_count, 0);
+```
+
+- show dispersion mismatch:
+
+```sql
+SELECT COUNT(*) AS mismatch_count
+FROM token_candidates cand
+LEFT JOIN (
+    SELECT
+        occ.candidate_id,
+        occ.inventory_version,
+        COUNT(DISTINCT e.show_id) AS show_count
+    FROM token_occurrences occ
+    JOIN episodes e
+        ON e.episode_id = occ.episode_id
+    WHERE occ.inventory_version = ?
+    GROUP BY occ.candidate_id, occ.inventory_version
+) occ
+    ON occ.candidate_id = cand.candidate_id
+    AND occ.inventory_version = cand.inventory_version
+WHERE cand.inventory_version = ?
+AND cand.show_dispersion != COALESCE(occ.show_count, 0);
+```
+
+- display text must come from occurrence evidence:
+
+```sql
+SELECT COUNT(*) AS mismatch_count
+FROM token_candidates cand
+WHERE cand.inventory_version = ?
+AND NOT EXISTS (
+    SELECT 1
+    FROM token_occurrences occ
+    WHERE occ.candidate_id = cand.candidate_id
+    AND occ.inventory_version = cand.inventory_version
+    AND occ.surface_text = cand.display_text
+);
+```
+
+Sanity checks:
+
+- top candidates do not change frequency after refresh
+- `C'est` can settle to `c'est` if lowercase evidence is tied or stronger
+- candidates like `en fait`, `du coup`, `tu vois`, `il y a` have expected dispersion
+- single-episode topic phrases show low episode dispersion even with high frequency
+
+Tests:
+
+- raw frequency recomputation
+- episode dispersion recomputation
+- show dispersion recomputation
+- display text modal selection
+- lowercase tie-break
+- idempotent refresh
+- orphan cleanup remains scoped to current inventory version
+
+Exit criteria:
+
+- all mismatch queries return zero
+- refresh is deterministic across repeated runs
+- full test suite passes
+
+#### Step 3C: Candidate Summary Query
+
+Add a simple inspection surface for stored metrics.
+
+Scope:
+
+- provide an internal summary query
+- support filtering by `ngram_size`
+- order by `raw_frequency DESC`, then `episode_dispersion DESC`, then `candidate_key`
+- include candidate key, display text, n-gram size, raw frequency, episode dispersion, and show dispersion
+- no scoring columns
+- no rank table
+
+CLI decision:
+
+- optional in Step 3
+- docs-only SQL is enough if the immediate need is inspection
+- add a CLI only if repeated operator workflow needs it
+
+Recommended query:
+
+```sql
+SELECT
+    candidate_key,
+    display_text,
+    ngram_size,
+    raw_frequency,
+    episode_dispersion,
+    show_dispersion
+FROM token_candidates
+WHERE inventory_version = ?
+AND ngram_size = ?
+ORDER BY raw_frequency DESC, episode_dispersion DESC, candidate_key
+LIMIT ?;
+```
+
+Validation:
+
+- top 1/2/3-gram queries return rows
+- ordering is stable
+- query works after a fresh metrics refresh
+- empty n-gram buckets return no rows without error
+
+Sanity checks:
+
+- inspect top 1-grams
+- inspect top 2-grams
+- inspect top 3-grams
+- confirm high-frequency chunks remain visible
+- confirm low-dispersion topic terms are easy to spot
+
+Tests:
+
+- summary query ordering
+- n-gram filtering
+- limit handling
+- empty result handling
+
+Exit criteria:
+
+- candidate metrics are inspectable without ad hoc SQL edits
+- no ranking behavior implied by the summary
+
+#### Step 3D: Pilot Metrics Inspection
+
+Run Step 3 on the current pilot DB and inspect output.
+
+Required commands:
+
+```text
+uv run podfreq generate-candidates --pilot zack-10h-pilot
+uv run ruff check src tests
+uv run pytest
+```
+
+Additional command depends on Step 3C decision:
+
+```text
+uv run podfreq refresh-candidate-metrics
+```
+
+or a documented SQL/scripted inspection query.
+
+DB validation:
+
+- raw frequency mismatch count is zero
+- episode dispersion mismatch count is zero
+- show dispersion mismatch count is zero
+- display text mismatch count is zero
+- `PRAGMA foreign_key_check` returns no rows
+- candidate count does not change except for legitimate orphan cleanup
+
+Sanity checks:
+
+- top 1-grams are plausible
+- top 2-grams are plausible
+- top 3-grams are plausible
+- `en fait`, `du coup`, `je pense`, `il y a`, `tu vois` remain visible
+- display text no longer over-preserves sentence-start capitalization
+- high-frequency but narrow phrases can be identified by low dispersion
+
+Tests:
+
+- unit and integration tests from 3A-3C remain green
+- pilot refresh does not require network
+- repeated pilot refresh is deterministic
+
+Exit criteria:
+
+- stored metrics match occurrence evidence
+- summary output is useful for manual inspection
+- Step 4 can build association and boundary features from a stable candidate set
 
 ### Step 4: Association And Boundary Features
 
@@ -828,12 +1163,364 @@ Deliverables:
 
 - t-score
 - normalized PMI
-- left/right context counts
+- left/right distinct context counts
 - left/right entropy
 
 Output:
 
 - better signal for true chunks vs glue phrases
+
+Step 4 should not be implemented as one broad pass.
+
+The underlying counts are deterministic, but the stage touches metric contract,
+nullable semantics, context definitions, association formulas, and inspection
+surface shape. Splitting keeps the math reviewable and avoids premature ranking
+policy leaking into a factual metrics stage.
+
+Recommended Step 4 stance:
+
+- treat Step 4 as stored factual unithood metrics, not ranking
+- compute Step 4 only for multiword candidates (`ngram_size >= 2`)
+- keep 1-gram Step 4 fields `NULL`
+- store Step 4 metrics on `token_candidates`
+- use immediate adjacent `token_key` context, not `surface_text`
+- include sentence-boundary sentinels in context distributions
+- compute trigram association by weakest internal split
+- do not add score weights, thresholds, or pruning in Step 4
+
+Deterministic parts:
+
+- immediate left/right neighbor extraction from `sentence_tokens`
+- sentence-boundary sentinel handling once selected
+- distinct context counts
+- entropy math
+- association refresh for a fixed formula contract
+- repeated refresh and validation queries
+
+Policy-driven but still deterministic after selection:
+
+- store metrics on `token_candidates` vs a separate table
+- use `NULL` for Step 4 fields on 1-grams
+- use distinct context counts rather than redundant total context counts
+- shared normalizer for association formulas
+- weakest-internal-split aggregation for 3-grams
+- extend existing inspection output rather than creating a ranking surface
+
+Out of scope for Step 4:
+
+- final ranking weights
+- minimum-score pruning
+- `candidate_scores`
+- redundancy suppression
+- example selection
+- proper-noun or function-word penalties
+- language-specific manual chunk whitelists
+
+#### Step 4A: Unithood Metric Contract And Schema
+
+Define the factual Step 4 metric contract and add storage.
+
+Scope:
+
+- add nullable Step 4 columns to `token_candidates`
+- keep Step 4 metrics on `token_candidates`, not a new metrics table
+- support existing DB migration
+- define which candidates receive Step 4 metrics
+- define exact field semantics before refresh logic
+- no ranking weights
+- no CLI behavior change yet
+
+Recommended stored fields:
+
+- `t_score REAL`
+- `npmi REAL`
+- `left_context_type_count INTEGER`
+- `right_context_type_count INTEGER`
+- `left_entropy REAL`
+- `right_entropy REAL`
+
+Recommended semantics:
+
+- Step 4 fields are populated only for `ngram_size >= 2`
+- Step 4 fields remain `NULL` for 1-grams
+- `left_context_type_count` and `right_context_type_count` count distinct
+  adjacent context token keys, including boundary sentinels
+- no separate total left/right context count column because total context count
+  is redundant with `raw_frequency` once boundary sentinels are included
+
+Reason:
+
+- Step 3 already stores factual candidate metrics on `token_candidates`
+- Step 4 is still about candidate facts, not final ranking policy
+- keeping Step 4 facts beside Step 3 facts avoids a parallel storage layer
+- nullable fields keep 1-gram semantics clean without inventing fake zeroes
+
+Validation:
+
+- fresh DB contains all Step 4 columns
+- existing DB migrates cleanly
+- 1-gram rows default to `NULL` in Step 4 columns
+- existing Step 3 metrics remain untouched by schema migration
+- foreign-key integrity remains clean
+
+Sanity checks:
+
+- no candidate or occurrence rows are created or deleted by migration
+- Step 4 schema can coexist with Step 3 summary queries
+- current Step 3 refresh still works before Step 4 refresh is added
+
+Tests:
+
+- fresh schema test
+- migration test from Step 3 schema
+- schema version test
+- nullable-field contract test for 1-grams
+
+Exit criteria:
+
+- Step 4 storage contract is explicit
+- migration is green
+- no refresh logic included yet
+
+#### Step 4B: Boundary Context Metrics
+
+Compute boundary-context facts from stored occurrences and sentence tokens.
+
+Scope:
+
+- derive immediate left and right neighbor `token_key` for each occurrence
+- treat sentence boundaries as explicit sentinel contexts
+- aggregate distinct left/right context counts
+- aggregate left/right entropy
+- keep computation set-based and scoped by `inventory_version`
+- no association metrics yet
+- no ranking behavior
+
+Recommended context policy:
+
+- left context = token whose `token_index = token_start_index - 1`
+- right context = token whose `token_index = token_end_index`
+- when no such token exists, use deterministic sentinels:
+  - `__BOS__`
+  - `__EOS__`
+- use analysis `token_key`, not `surface_text`
+
+Recommended entropy definition:
+
+```text
+entropy = -SUM(p_i * LN(p_i))
+```
+
+where `p_i` is the probability of each observed adjacent context value for the
+candidate side being measured.
+
+Reason:
+
+- immediate adjacency matches the project goal of boundary strength
+- `token_key` keeps the metric portable and less noisy than surface strings
+- boundary sentinels prevent sentence-edge occurrences from disappearing
+- distinct counts plus entropy give both inspectability and actual signal
+
+Validation:
+
+- every multiword occurrence contributes one left context and one right context
+- left/right distinct context counts are nonzero for multiword candidates
+- entropy is zero when one side always appears in the same context
+- entropy increases when context diversity increases
+
+Sanity checks:
+
+- `il y a` can show limited but nonzero context diversity
+- glue phrases like `de la` or `que je` should often show broader context spread
+- clause-edge chunks are not penalized for missing neighbors
+
+Tests:
+
+- left-context extraction
+- right-context extraction
+- boundary sentinel handling
+- distinct-count aggregation
+- zero-entropy fixed-context case
+- higher-entropy varied-context case
+- deterministic repeated refresh
+
+Exit criteria:
+
+- stored boundary metrics match occurrence evidence
+- repeated refresh is deterministic
+- no association math included yet
+
+#### Step 4C: Association Metrics
+
+Compute multiword cohesion metrics from stored candidate frequencies.
+
+Scope:
+
+- compute `t_score`
+- compute `npmi`
+- support bigrams and trigrams
+- use stored candidate frequencies from Step 3
+- use a deterministic split policy for 3-grams
+- no ranking weights
+- no pruning thresholds
+
+Recommended association contract:
+
+- compute association only for `ngram_size >= 2`
+- use the total unigram occurrence count for the current `inventory_version`
+  as the shared corpus normalizer
+- compute bigram association directly
+- compute trigram association on each internal binary split and keep the weaker
+  value for both `t_score` and `npmi`
+
+Recommended formulas:
+
+For a candidate split into `left_part` and `right_part`:
+
+```text
+observed = freq(candidate)
+left_freq = freq(left_part)
+right_freq = freq(right_part)
+N = total unigram occurrence count for inventory_version
+
+expected = (left_freq * right_freq) / N
+t_score = (observed - expected) / sqrt(observed)
+npmi = ln((observed * N) / (left_freq * right_freq)) / -ln(observed / N)
+```
+
+For trigrams:
+
+```text
+candidate_metric = min(metric(split_1), metric(split_2))
+```
+
+where `split_1` and `split_2` are the two internal binary splits.
+
+Reason:
+
+- `t_score` favors common useful chunks
+- `npmi` captures cohesion
+- using both follows the design goal of avoiding raw-frequency-only and
+  PMI-only behavior
+- weakest-split aggregation better matches the unithood question for 3-grams
+- shared unigram normalizer keeps the contract simple and portable
+
+Validation:
+
+- bigram metrics match hand-worked toy examples
+- trigram metrics use the weaker internal split
+- higher-frequency cohesive chunks outperform obvious glue phrases on at least
+  one association signal
+- 1-gram Step 4 fields remain `NULL`
+
+Sanity checks:
+
+- `en fait`, `du coup`, `il y a`, `je pense` show materially stronger
+  association than `de la`, `que je`, `et le`
+- rare phrases may have strong `npmi`, but `t_score` stays modest
+- glue phrases can still be frequent while showing weaker cohesion
+
+Tests:
+
+- bigram `t_score` formula
+- bigram `npmi` formula
+- trigram weakest-split behavior
+- 1-gram null semantics
+- deterministic repeated refresh
+
+Exit criteria:
+
+- Step 4 stores factual association metrics for multiword candidates
+- formulas are documented and test-backed
+- no score weighting or pruning included yet
+
+#### Step 4D: Inspection Surface
+
+Expose Step 4 metrics for review without turning Step 4 into ranking.
+
+Scope:
+
+- extend existing candidate metrics inspection surface
+- include Step 4 fields in focused candidate inspection
+- include Step 4 fields in top 2/3-gram summaries
+- keep existing Step 3 frequency-first ordering unless there is a strong reason
+  to change it later in Step 6
+- no `candidate_scores`
+- no final ranking report yet
+
+Recommended inspection stance:
+
+- keep current top-candidate lists frequency-first for continuity
+- show Step 4 metrics alongside Step 3 metrics
+- use focused candidate inspection for side-by-side comparisons such as:
+  - `en fait` vs `de la`
+  - `du coup` vs `que je`
+  - `je pense` vs `et le`
+
+Reason:
+
+- Step 4 is a factual metric stage, not ranking
+- keeping ordering stable avoids hiding Step 4 problems behind early heuristics
+- the existing inspect command already provides the right operator workflow
+
+Validation:
+
+- Step 4 values appear in inspection output
+- top 2/3-gram inspection remains usable
+- focused candidate inspection can compare strong chunks and weak glue phrases
+
+Tests:
+
+- summary row/report shape test
+- focused candidate inspection output test
+- no regression in existing Step 3 inspection behavior
+
+Exit criteria:
+
+- Step 4 metrics are inspectable without ad hoc SQL
+- no ranking behavior is implied by the inspection surface
+
+#### Step 4E: Pilot Validation
+
+Run Step 4 refresh and inspect pilot-scale behavior.
+
+Required commands:
+
+```text
+uv run podfreq refresh-candidate-metrics
+uv run podfreq inspect-candidate-metrics --limit 10
+uv run ruff check src tests
+uv run pytest
+```
+
+DB validation:
+
+- Step 3 mismatch counts remain zero
+- 1-gram Step 4 fields remain `NULL`
+- multiword Step 4 fields populate for candidates with occurrences
+- repeated refresh remains deterministic
+- foreign-key integrity remains clean
+
+Sanity checks:
+
+- `en fait`, `du coup`, `il y a`, `je pense`, `tu vois` are still visible
+- those chunks show stronger cohesion or tighter boundary behavior than obvious
+  glue phrases
+- high-frequency glue phrases remain visible for inspection rather than being
+  silently pruned
+- boundary sentinels do not create strange missing-value patterns
+
+Tests:
+
+- unit and integration tests from 4A-4D remain green
+- pilot refresh does not require network
+- repeated pilot refresh is deterministic
+
+Exit criteria:
+
+- Step 4 metrics are stored, inspectable, and pilot-validated
+- Step 5 can compare smaller candidates against larger candidates using a stable
+  unithood base
 
 ### Step 5: Redundancy And Coverage
 
@@ -896,24 +1583,31 @@ Output:
 
 ## Recommended Immediate Next Step
 
-Step 1 is implemented.
+Step 3A through 3D are implemented through metrics schema, deterministic metrics
+refresh, candidate inspection commands, and pilot-scale validation.
+
+Step 4 should now be implemented as explicit substeps 4A through 4E.
 
 Current completed target:
 
 ```text
-sentence rows -> sentence_tokens
+token_occurrences -> inspectable stored frequency and dispersion metrics
 ```
 
 Next implementation target:
 
 ```text
-sentence_tokens -> token_candidates + token_occurrences
+stable candidate facts -> stored unithood metrics for multiword candidates
 ```
 
 Reason:
 
-- token rows now preserve offsets and surface text
-- candidate generation can now build contiguous spans safely
-- every future candidate can link back to exact sentence context
+- candidate facts can now be refreshed and inspected from occurrence evidence
+- raw frequency, episode dispersion, show dispersion, and display text can be validated directly
+- top 1/2/3-gram summaries can be inspected without ad hoc SQL
+- Step 4 needs an explicit contract for null semantics, boundary contexts, and
+  association formulas before refresh logic is added
+- splitting Step 4 prevents factual metrics from getting mixed with Step 6
+  ranking policy
 
-Next step: Step 2, Candidate Inventory.
+Next step: Step 4A, Unithood Metric Contract And Schema.
