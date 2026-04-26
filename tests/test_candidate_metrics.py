@@ -20,6 +20,7 @@ def _insert_episode_context(
     show_id: int,
     guid: str,
     sentence_text: str = "en fait",
+    source_model: str = "test-model",
 ) -> tuple[int, int, int]:
     upsert_episode(
         connection,
@@ -48,9 +49,9 @@ def _insert_episode_context(
                 status,
                 model
             )
-            VALUES (?, 'asr', 'ready', 'test-model')
+            VALUES (?, 'asr', 'ready', ?)
             """,
-            (episode_id,),
+            (episode_id, source_model),
         ).lastrowid
     )
     segment_id = int(
@@ -306,12 +307,14 @@ def _insert_occurrence_bundle(
     guid: str,
     sentence_text: str,
     occurrences: tuple[tuple[int, int, int, int, int, str], ...],
+    source_model: str = "test-model",
 ) -> None:
     episode_id, segment_id, sentence_id = _insert_episode_context(
         connection,
         show_id=show_id,
         guid=guid,
         sentence_text=sentence_text,
+        source_model=source_model,
     )
     _insert_sentence_tokens(
         connection,
@@ -340,6 +343,30 @@ def _insert_occurrence_bundle(
             char_end=char_end,
             surface_text=surface_text,
         )
+
+
+def _load_containment_rows(connection, *, inventory_version: str = INVENTORY_VERSION):
+    rows = connection.execute(
+        """
+        SELECT
+            smaller.candidate_key AS smaller_key,
+            larger.candidate_key AS larger_key,
+            cc.extension_side,
+            cc.shared_occurrence_count,
+            cc.shared_episode_count
+        FROM candidate_containment cc
+        JOIN token_candidates smaller
+            ON smaller.candidate_id = cc.smaller_candidate_id
+            AND smaller.inventory_version = cc.inventory_version
+        JOIN token_candidates larger
+            ON larger.candidate_id = cc.larger_candidate_id
+            AND larger.inventory_version = cc.inventory_version
+        WHERE cc.inventory_version = ?
+        ORDER BY smaller_key, larger_key
+        """,
+        (inventory_version,),
+    ).fetchall()
+    return tuple(dict(row) for row in rows)
 
 
 def test_candidate_metrics_service_refreshes_metrics_and_display_text(tmp_path) -> None:
@@ -1389,6 +1416,248 @@ def test_candidate_metrics_service_refreshes_association_for_filtered_numeric_sp
     assert row["raw_frequency"] == 3
     assert row["t_score"] == pytest.approx(expected_t_score)
     assert row["npmi"] == pytest.approx(expected_npmi)
+
+
+def test_candidate_metrics_service_refreshes_direct_parent_containment_rows(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        envie_id = _insert_candidate(
+            connection,
+            candidate_key="envie",
+            display_text="envie",
+            ngram_size=1,
+        )
+        ai_envie_id = _insert_candidate(
+            connection,
+            candidate_key="ai envie",
+            display_text="ai envie",
+            ngram_size=2,
+        )
+        envie_de_id = _insert_candidate(
+            connection,
+            candidate_key="envie de",
+            display_text="envie de",
+            ngram_size=2,
+        )
+        j_ai_envie_id = _insert_candidate(
+            connection,
+            candidate_key="j ai envie",
+            display_text="j ai envie",
+            ngram_size=3,
+        )
+        ai_envie_de_id = _insert_candidate(
+            connection,
+            candidate_key="ai envie de",
+            display_text="ai envie de",
+            ngram_size=3,
+        )
+
+        for index in range(2):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid="ep-shared",
+                sentence_text="j ai envie",
+                source_model=f"test-model-{index}",
+                occurrences=(
+                    (envie_id, 2, 3, 5, 10, "envie"),
+                    (ai_envie_id, 1, 3, 2, 10, "ai envie"),
+                    (j_ai_envie_id, 0, 3, 0, 10, "j ai envie"),
+                ),
+            )
+
+        _insert_occurrence_bundle(
+            connection,
+            show_id=show_id,
+            guid="ep-other",
+            sentence_text="ai envie de",
+            occurrences=(
+                (envie_id, 1, 2, 3, 8, "envie"),
+                (ai_envie_id, 0, 2, 0, 8, "ai envie"),
+                (envie_de_id, 1, 3, 3, 11, "envie de"),
+                (ai_envie_de_id, 0, 3, 0, 11, "ai envie de"),
+            ),
+        )
+        connection.commit()
+
+    CandidateMetricsService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        rows = _load_containment_rows(connection)
+        skipped_pair_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM candidate_containment cc
+            JOIN token_candidates smaller
+                ON smaller.candidate_id = cc.smaller_candidate_id
+                AND smaller.inventory_version = cc.inventory_version
+            JOIN token_candidates larger
+                ON larger.candidate_id = cc.larger_candidate_id
+                AND larger.inventory_version = cc.inventory_version
+            WHERE cc.inventory_version = ?
+            AND smaller.candidate_key = 'envie'
+            AND larger.candidate_key = 'j ai envie'
+            """,
+            (INVENTORY_VERSION,),
+        ).fetchone()[0]
+
+    assert rows == (
+        {
+            "smaller_key": "ai envie",
+            "larger_key": "ai envie de",
+            "extension_side": "right",
+            "shared_occurrence_count": 1,
+            "shared_episode_count": 1,
+        },
+        {
+            "smaller_key": "ai envie",
+            "larger_key": "j ai envie",
+            "extension_side": "left",
+            "shared_occurrence_count": 2,
+            "shared_episode_count": 1,
+        },
+        {
+            "smaller_key": "envie",
+            "larger_key": "ai envie",
+            "extension_side": "left",
+            "shared_occurrence_count": 3,
+            "shared_episode_count": 2,
+        },
+        {
+            "smaller_key": "envie",
+            "larger_key": "envie de",
+            "extension_side": "right",
+            "shared_occurrence_count": 1,
+            "shared_episode_count": 1,
+        },
+        {
+            "smaller_key": "envie de",
+            "larger_key": "ai envie de",
+            "extension_side": "left",
+            "shared_occurrence_count": 1,
+            "shared_episode_count": 1,
+        },
+    )
+    assert skipped_pair_count == 0
+
+
+def test_candidate_metrics_service_containment_refresh_replaces_stale_rows(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        envie_id = _insert_candidate(
+            connection,
+            candidate_key="envie",
+            display_text="envie",
+            ngram_size=1,
+        )
+        ai_envie_id = _insert_candidate(
+            connection,
+            candidate_key="ai envie",
+            display_text="ai envie",
+            ngram_size=2,
+        )
+        _insert_occurrence_bundle(
+            connection,
+            show_id=show_id,
+            guid="ep-1",
+            sentence_text="ai envie",
+            occurrences=(
+                (envie_id, 1, 2, 3, 8, "envie"),
+                (ai_envie_id, 0, 2, 0, 8, "ai envie"),
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_containment (
+                inventory_version,
+                smaller_candidate_id,
+                larger_candidate_id,
+                extension_side,
+                shared_occurrence_count,
+                shared_episode_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (INVENTORY_VERSION, envie_id, ai_envie_id, "left", 99, 99),
+        )
+        connection.commit()
+
+    CandidateMetricsService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        rows = _load_containment_rows(connection)
+
+    assert rows == (
+        {
+            "smaller_key": "envie",
+            "larger_key": "ai envie",
+            "extension_side": "left",
+            "shared_occurrence_count": 1,
+            "shared_episode_count": 1,
+        },
+    )
+
+
+def test_candidate_metrics_service_containment_refresh_is_idempotent(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        envie_id = _insert_candidate(
+            connection,
+            candidate_key="envie",
+            display_text="envie",
+            ngram_size=1,
+        )
+        ai_envie_id = _insert_candidate(
+            connection,
+            candidate_key="ai envie",
+            display_text="ai envie",
+            ngram_size=2,
+        )
+        _insert_occurrence_bundle(
+            connection,
+            show_id=show_id,
+            guid="ep-1",
+            sentence_text="ai envie",
+            occurrences=(
+                (envie_id, 1, 2, 3, 8, "envie"),
+                (ai_envie_id, 0, 2, 0, 8, "ai envie"),
+            ),
+        )
+        connection.commit()
+
+    service = CandidateMetricsService(db_path=db_path)
+    service.refresh()
+
+    with connect(db_path) as connection:
+        first_rows = _load_containment_rows(connection)
+
+    service.refresh()
+
+    with connect(db_path) as connection:
+        second_rows = _load_containment_rows(connection)
+
+    assert second_rows == first_rows
 
 
 def test_candidate_metrics_service_errors_without_candidates(tmp_path) -> None:

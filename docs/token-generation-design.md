@@ -1955,4 +1955,4 @@ Reason:
 - splitting Step 5 into schema, refresh, inspection, and pilot validation keeps
   pairwise containment facts separate from Step 6 score weighting
 
-Next step: Step 5B, Direct-Parent Containment Refresh.
+Next step: Step 5C, Candidate-Level Coverage Summaries And Inspection.
