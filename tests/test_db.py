@@ -355,6 +355,12 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
             row["name"]: row
             for row in connection.execute("PRAGMA table_info(token_candidates)").fetchall()
         }
+        containment_columns = {
+            row["name"]: row
+            for row in connection.execute(
+                "PRAGMA table_info(candidate_containment)"
+            ).fetchall()
+        }
         tables = {
             row["name"]
             for row in connection.execute(
@@ -377,7 +383,7 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         }
         foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-    assert {"token_candidates", "token_occurrences"} <= tables
+    assert {"token_candidates", "token_occurrences", "candidate_containment"} <= tables
     assert {
         "episode_dispersion",
         "show_dispersion",
@@ -388,6 +394,14 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         "left_entropy",
         "right_entropy",
     } <= candidate_columns.keys()
+    assert {
+        "inventory_version",
+        "smaller_candidate_id",
+        "larger_candidate_id",
+        "extension_side",
+        "shared_occurrence_count",
+        "shared_episode_count",
+    } <= containment_columns.keys()
     assert candidate_columns["episode_dispersion"]["notnull"] == 1
     assert candidate_columns["episode_dispersion"]["dflt_value"] == "0"
     assert candidate_columns["show_dispersion"]["notnull"] == 1
@@ -404,6 +418,12 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert candidate_columns["left_entropy"]["dflt_value"] is None
     assert candidate_columns["right_entropy"]["notnull"] == 0
     assert candidate_columns["right_entropy"]["dflt_value"] is None
+    assert containment_columns["inventory_version"]["notnull"] == 1
+    assert containment_columns["smaller_candidate_id"]["notnull"] == 1
+    assert containment_columns["larger_candidate_id"]["notnull"] == 1
+    assert containment_columns["extension_side"]["notnull"] == 1
+    assert containment_columns["shared_occurrence_count"]["notnull"] == 1
+    assert containment_columns["shared_episode_count"]["notnull"] == 1
     assert {
         "idx_token_candidates_inventory_version",
         "idx_token_candidates_ngram_size",
@@ -412,6 +432,7 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         "idx_token_occurrences_sentence",
         "idx_token_occurrences_episode",
         "idx_token_occurrences_scope",
+        "idx_candidate_containment_larger",
     } <= indexes
     assert foreign_key_issues == []
 
@@ -572,6 +593,100 @@ def test_bootstrap_migrates_step4_columns_from_v10_schema(tmp_path) -> None:
     assert foreign_key_issues == []
 
 
+def test_bootstrap_creates_candidate_containment_table_from_v11_schema(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+                show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+                t_score REAL,
+                npmi REAL,
+                left_context_type_count INTEGER
+                    CHECK (left_context_type_count IS NULL OR left_context_type_count >= 0),
+                right_context_type_count INTEGER
+                    CHECK (right_context_type_count IS NULL OR right_context_type_count >= 0),
+                left_entropy REAL
+                    CHECK (left_entropy IS NULL OR left_entropy >= 0),
+                right_entropy REAL
+                    CHECK (right_entropy IS NULL OR right_entropy >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                t_score,
+                npmi
+            )
+            VALUES ('1', 'en fait', 'en fait', 2, 7, 3, 2, 1.5, 0.4)
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        containment_columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(candidate_containment)"
+            ).fetchall()
+        }
+        row = connection.execute(
+            """
+            SELECT
+                candidate_key,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                t_score,
+                npmi
+            FROM token_candidates
+            WHERE candidate_key = 'en fait'
+            """
+        ).fetchone()
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert {
+        "inventory_version",
+        "smaller_candidate_id",
+        "larger_candidate_id",
+        "extension_side",
+        "shared_occurrence_count",
+        "shared_episode_count",
+    } <= containment_columns
+    assert row["raw_frequency"] == 7
+    assert row["episode_dispersion"] == 3
+    assert row["show_dispersion"] == 2
+    assert row["t_score"] == 1.5
+    assert row["npmi"] == 0.4
+    assert schema_version == SCHEMA_VERSION
+    assert foreign_key_issues == []
+
+
 def test_step4_columns_default_to_null_for_one_gram_candidates(tmp_path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)
@@ -700,3 +815,84 @@ def test_token_occurrences_cascade_when_candidate_is_deleted(tmp_path) -> None:
         ).fetchone()[0]
 
     assert occurrence_count == 0
+
+
+def test_candidate_containment_enforces_uniqueness_and_foreign_keys(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        smaller_candidate_id = _insert_candidate(
+            connection,
+            candidate_key="envie",
+            display_text="envie",
+            ngram_size=1,
+        )
+        larger_candidate_id = _insert_candidate(
+            connection,
+            candidate_key="ai envie",
+            display_text="ai envie",
+            ngram_size=2,
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_containment (
+                inventory_version,
+                smaller_candidate_id,
+                larger_candidate_id,
+                extension_side,
+                shared_occurrence_count,
+                shared_episode_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("1", smaller_candidate_id, larger_candidate_id, "left", 3, 2),
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO candidate_containment (
+                    inventory_version,
+                    smaller_candidate_id,
+                    larger_candidate_id,
+                    extension_side,
+                    shared_occurrence_count,
+                    shared_episode_count
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("1", smaller_candidate_id, larger_candidate_id, "left", 3, 2),
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO candidate_containment (
+                    inventory_version,
+                    smaller_candidate_id,
+                    larger_candidate_id,
+                    extension_side,
+                    shared_occurrence_count,
+                    shared_episode_count
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("1", 999, larger_candidate_id, "left", 1, 1),
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO candidate_containment (
+                    inventory_version,
+                    smaller_candidate_id,
+                    larger_candidate_id,
+                    extension_side,
+                    shared_occurrence_count,
+                    shared_episode_count
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("2", smaller_candidate_id, larger_candidate_id, "left", 1, 1),
+            )

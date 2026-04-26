@@ -269,3 +269,28 @@ CREATE INDEX IF NOT EXISTS idx_token_occurrences_episode
 
 CREATE INDEX IF NOT EXISTS idx_token_occurrences_scope
     ON token_occurrences (inventory_version, episode_id, segment_id);
+
+CREATE TABLE IF NOT EXISTS candidate_containment (
+    inventory_version TEXT NOT NULL,
+    smaller_candidate_id INTEGER NOT NULL,
+    larger_candidate_id INTEGER NOT NULL,
+    extension_side TEXT NOT NULL CHECK (extension_side IN ('left', 'right')),
+    shared_occurrence_count INTEGER NOT NULL CHECK (shared_occurrence_count > 0),
+    shared_episode_count INTEGER NOT NULL
+        CHECK (
+            shared_episode_count > 0
+            AND shared_episode_count <= shared_occurrence_count
+        ),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (inventory_version, smaller_candidate_id, larger_candidate_id),
+    CHECK (smaller_candidate_id <> larger_candidate_id),
+    FOREIGN KEY (smaller_candidate_id, inventory_version)
+        REFERENCES token_candidates(candidate_id, inventory_version)
+        ON DELETE CASCADE,
+    FOREIGN KEY (larger_candidate_id, inventory_version)
+        REFERENCES token_candidates(candidate_id, inventory_version)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_containment_larger
+    ON candidate_containment (inventory_version, larger_candidate_id);

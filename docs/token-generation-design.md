@@ -1550,17 +1550,333 @@ Exit criteria:
 
 ### Step 5: Redundancy And Coverage
 
-Detect when smaller candidates are mostly covered by larger candidates.
+Detect when a smaller candidate is mostly the same thing as a better larger
+candidate.
 
 Deliverables:
 
-- containment coverage metrics
-- redundancy penalty
-- overlap-aware ranking behavior
+- direct-parent containment facts
+- candidate-level redundancy summaries
+- inspection surface for coverage and dominance
 
 Output:
 
-- better choices between `dirais` and `je dirais`
+- better choices between `me dis` and `je me dis`
+- better choices between `en tout` and `en tout cas`
+- without collapsing productive chunks such as `du coup` or `en fait`
+
+Step 5 should not be implemented as one broad pass.
+
+The containment joins are deterministic, but the stage defines what counts as
+coverage, which larger candidates matter, how to avoid chain double-counting,
+and where ranking policy begins. Splitting keeps pairwise containment facts
+reviewable and prevents Step 6 scoring policy from leaking into the storage
+contract.
+
+Recommended Step 5 stance:
+
+- keep overlapping candidates in inventory
+- compare only direct parents:
+  - `1`-gram -> `2`-gram
+  - `2`-gram -> `3`-gram
+- measure coverage from distinct smaller occurrences, not raw overlap rows
+- store pairwise containment facts in a new `candidate_containment` table
+- derive candidate-level summaries by aggregating stored pair facts
+- keep `covered by any larger candidate` and `dominated by one larger
+  candidate` as separate questions
+- reuse the existing refresh and inspection commands rather than adding a
+  parallel Step 5 command surface
+- keep numeric redundancy penalties and final ranking weights out of Step 5
+
+Deterministic parts:
+
+- direct-parent containment joins from `token_occurrences`
+- extension-side classification from token offsets
+- distinct covered occurrence counts
+- distinct covered episode counts
+- candidate-level summary aggregation from stored pair facts
+- repeated refresh and validation queries
+
+Policy-driven but still deterministic after selection:
+
+- direct-parent-only comparison vs all-larger comparison
+- pair table vs candidate-only storage
+- exact dominant-parent tie-break rules
+- which candidate-level summary fields to expose in inspection
+- whether Step 5 stops at facts or also stores a provisional penalty
+
+Out of scope for Step 5:
+
+- `candidate_scores`
+- final score weights
+- hard pruning or candidate deletion
+- keep/reject decisions
+- blacklist hooks
+- example selection
+- final ranked candidate report
+
+#### Step 5A: Direct-Parent Containment Contract And Schema
+
+Define the factual containment contract and add storage.
+
+Scope:
+
+- add a new `candidate_containment` table
+- define which smaller/larger pairs can appear
+- define direct-parent semantics before refresh logic
+- support DB migration
+- add only the indexes needed for Step 5 refresh and inspection
+- no candidate-level penalty yet
+- no CLI behavior change yet
+
+Recommended stored fields:
+
+- `smaller_candidate_id INTEGER NOT NULL`
+- `larger_candidate_id INTEGER NOT NULL`
+- `inventory_version TEXT NOT NULL`
+- `extension_side TEXT NOT NULL`
+- `shared_occurrence_count INTEGER NOT NULL`
+- `shared_episode_count INTEGER NOT NULL`
+
+Recommended semantics:
+
+- one row per `(inventory_version, smaller_candidate_id, larger_candidate_id)`
+- only store direct-parent pairs where the larger candidate is exactly one token
+  longer than the smaller candidate
+- only store pairs with `shared_occurrence_count > 0`
+- `extension_side = 'left'` when the larger candidate begins one token earlier
+- `extension_side = 'right'` when the larger candidate ends one token later
+- under the current `1`/`2`/`3`-gram pipeline, Step 5 pair rows can only point
+  from `1`-grams to `2`-grams or from `2`-grams to `3`-grams
+- do not add Step 5 coverage columns to `token_candidates` yet
+
+Reason:
+
+- containment is inherently relational and does not fit cleanly on a single
+  candidate row
+- direct-parent storage avoids chain inflation while preserving the actual
+  redundancy choice the ranking stage needs
+- counts stay factual and ratios remain derivable from existing
+  `raw_frequency`
+
+Validation:
+
+- fresh DB contains `candidate_containment`
+- existing DB migrates cleanly
+- foreign keys and uniqueness constraints are enforced
+- no Step 4 candidate metrics are changed by migration
+
+Sanity checks:
+
+- `3`-grams can appear as `larger_candidate_id`
+- under the current max `ngram_size`, `3`-grams do not appear as covered
+  smaller candidates
+- Step 5 schema coexists with the current `refresh-candidate-metrics` workflow
+
+Tests:
+
+- fresh schema test
+- migration test from Step 4 schema
+- schema version test
+- foreign-key and uniqueness contract test
+
+Exit criteria:
+
+- Step 5 storage contract is explicit
+- migration is green
+- no containment refresh logic included yet
+
+#### Step 5B: Direct-Parent Containment Refresh
+
+Compute pairwise containment facts from stored occurrences.
+
+Scope:
+
+- derive direct-parent containment from `token_occurrences`
+- classify each pair as a left-extension or right-extension relationship
+- aggregate `shared_occurrence_count`
+- aggregate `shared_episode_count`
+- keep computation set-based and scoped by `inventory_version`
+- integrate refresh into the existing metrics workflow
+- no candidate-level penalty yet
+- no ranking behavior
+
+Recommended containment contract:
+
+- a pair qualifies when a larger occurrence strictly contains a smaller
+  occurrence in the same sentence
+- the larger span must be exactly one token longer than the smaller span
+- count distinct smaller `occurrence_id` values per pair
+- count distinct `episode_id` values per pair
+- refresh should replace current `inventory_version` pair rows deterministically
+- do not aggregate all larger candidates into one Step 5 fact row yet
+
+Reason:
+
+- distinct smaller-occurrence counting avoids overlap inflation in repeated-token
+  or nested-span cases
+- direct-parent restriction captures the real redundancy choice while avoiding
+  transitive chain noise
+- episode counts add portability beyond one-sentence or one-episode bursts
+
+Validation:
+
+- every Step 5 pair row has `larger.ngram_size = smaller.ngram_size + 1`
+- `shared_occurrence_count` is less than or equal to both candidate
+  `raw_frequency` values
+- `extension_side` matches token-offset evidence
+- repeated refresh is deterministic
+
+Sanity checks:
+
+- `pense que -> je pense que` reaches full direct-parent coverage
+- `me dis -> je me dis` shows a strong dominant-parent share
+- productive chunks such as `du coup` and `en fait` can show high
+  any-coverage while keeping much lower best-parent share
+- `dirais` is not falsely treated as fully dominated if no single parent covers
+  all occurrences
+
+Tests:
+
+- direct-parent join extraction
+- left-extension classification
+- right-extension classification
+- distinct occurrence aggregation
+- distinct episode aggregation
+- deterministic repeated refresh
+- no rows for zero-overlap pairs
+
+Exit criteria:
+
+- pair facts are stored and deterministic
+- no candidate-level ranking penalty is included yet
+
+#### Step 5C: Candidate-Level Coverage Summaries And Inspection
+
+Expose Step 5 facts for review without turning them into final ranking.
+
+Scope:
+
+- aggregate `candidate_containment` into candidate-level summaries
+- extend focused candidate inspection with Step 5 coverage fields
+- extend top `1`-gram and `2`-gram summaries with Step 5 coverage fields
+- keep top-list ordering frequency-first until Step 6 chooses ranking weights
+- no `candidate_scores`
+- no hard suppression yet
+
+Recommended summary fields:
+
+- `covered_by_any_count`
+- `covered_by_any_ratio`
+- `independent_occurrence_count`
+- `direct_parent_count`
+- `dominant_parent_key`
+- `dominant_parent_shared_count`
+- `dominant_parent_share`
+- `dominant_parent_side`
+
+Recommended summary semantics:
+
+- `covered_by_any_count` counts distinct smaller occurrences covered by at least
+  one direct parent
+- `independent_occurrence_count = raw_frequency - covered_by_any_count`
+- `direct_parent_count` counts direct-parent types with
+  `shared_occurrence_count > 0`
+- `dominant_parent_key` is the direct parent with the largest
+  `shared_occurrence_count`
+- dominant-parent ties break by:
+  - higher parent `raw_frequency`
+  - then lexical `candidate_key`
+- `dominant_parent_share = dominant_parent_shared_count / raw_frequency`
+- Step 5 summaries are meaningful only for candidates that can have a direct
+  parent under the current `max_n`
+
+Reason:
+
+- coverage by any larger candidate alone over-penalizes productive chunks
+- dominant-parent share plus residual count better captures the redundancy
+  question
+- keeping Step 5 inspectable before Step 6 helps prevent premature ranking
+  heuristics
+
+Validation:
+
+- candidate-level Step 5 summaries match `candidate_containment` rows
+- dominant-parent selection is deterministic
+- top lists remain readable and frequency-first
+- focused inspection can compare clear redundancy cases and clear
+  non-redundancy cases
+
+Sanity checks:
+
+- `pense que`, `en tout`, `tout cas`, and `ailleurs` show near-total
+  dominant-parent coverage
+- `du coup`, `en fait`, `je pense`, and `se passe` show lower dominant-parent
+  share despite broad any-coverage
+- `3`-grams show no fake covered-by-parent summaries under the current
+  `1`/`2`/`3`-gram cap
+
+Tests:
+
+- pair-to-summary aggregation test
+- dominant-parent tie-break test
+- candidate inspection output test
+- no regression in existing Step 4 inspection behavior
+
+Exit criteria:
+
+- containment facts are inspectable without ad hoc SQL
+- coverage and dominance are visible as separate ideas
+- no final score weighting is implied by the inspection surface
+
+#### Step 5D: Pilot Validation
+
+Run Step 5 refresh and inspect pilot-scale behavior.
+
+Required commands:
+
+```text
+uv run podfreq refresh-candidate-metrics
+uv run podfreq inspect-candidate-metrics --limit 10
+uv run ruff check src tests
+uv run pytest
+```
+
+DB validation:
+
+- Step 4 mismatch counts remain zero
+- `candidate_containment` rows only connect `1 -> 2` and `2 -> 3`
+- `shared_occurrence_count` never exceeds the smaller or larger candidate
+  `raw_frequency`
+- candidate-level Step 5 summaries stay consistent with `raw_frequency`
+- repeated refresh remains deterministic
+- foreign-key integrity remains clean
+
+Sanity checks:
+
+- `me dis` and `pense que` look strongly dominated by one direct parent
+- `en tout` and `tout cas` look strongly dominated by `en tout cas`
+- `du coup`, `en fait`, and `je pense` remain visible as productive chunks even
+  when they are covered by many direct parents
+- `envie` shows meaningful containment structure without collapsing into one
+  obvious dominant parent
+- top `3`-gram inspection does not invent fake Step 5 covered-by-parent values
+- repeated refreshes leave pair counts and candidate-level Step 5 summaries
+  unchanged
+- Step 5 inspection remains factual only: no new pruning and no candidate
+  disappearance caused by the refresh itself
+
+Tests:
+
+- unit and integration tests from 5A-5C remain green
+- pilot refresh does not require network
+- repeated pilot refresh is deterministic
+
+Exit criteria:
+
+- Step 5 containment facts are stored, inspectable, and pilot-validated
+- Step 6 can apply a ranking penalty using stable Step 5 facts instead of
+  ad hoc overlap guesses
 
 ### Step 6: Candidate Ranking V1
 
@@ -1613,7 +1929,7 @@ Step 4A through 4E are implemented through unithood metric schema, deterministic
 association and boundary refresh, candidate inspection commands, and pilot-scale
 validation.
 
-Step 5 should now be implemented as explicit substeps.
+Step 5 should now be implemented as explicit substeps `5A` through `5D`.
 
 Current completed target:
 
@@ -1624,7 +1940,8 @@ stable candidate facts -> stored unithood metrics for multiword candidates
 Next implementation target:
 
 ```text
-stored unithood metrics -> redundancy and coverage comparisons between smaller and larger candidates
+stored unithood metrics -> stored direct-parent containment facts and
+inspectable dominance summaries
 ```
 
 Reason:
@@ -1633,9 +1950,9 @@ Reason:
   association, and boundary metrics
 - pilot validation shows Step 4 metrics are populated, deterministic, and
   visible in the existing inspection workflow
-- Step 5 can now compare smaller candidates against larger candidates using a
-  stable unithood base instead of raw frequency alone
-- splitting Step 5 keeps redundancy and coverage behavior separate from Step 6
-  ranking policy
+- Step 5 can now compare smaller candidates against specific direct parents
+  using a stable unithood base instead of raw frequency alone
+- splitting Step 5 into schema, refresh, inspection, and pilot validation keeps
+  pairwise containment facts separate from Step 6 score weighting
 
-Next step: Step 5, Redundancy And Coverage.
+Next step: Step 5B, Direct-Parent Containment Refresh.
