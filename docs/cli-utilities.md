@@ -20,6 +20,8 @@ Current command list:
 - `split-sentences`
 - `tokenize-sentences`
 - `generate-candidates`
+- `refresh-candidate-metrics`
+- `inspect-candidate-metrics`
 
 ## Core Workflow
 
@@ -34,6 +36,8 @@ Normal flow:
 8. split kept chunks into sentence-like context lines
 9. tokenize sentence rows for candidate generation
 10. generate candidate inventory rows and occurrence evidence
+11. refresh stored candidate metrics
+12. inspect top candidate metrics
 
 Example:
 
@@ -48,6 +52,8 @@ uv run podfreq qc-segments --pilot zack-10h-pilot
 uv run podfreq split-sentences --pilot zack-10h-pilot
 uv run podfreq tokenize-sentences --pilot zack-10h-pilot
 uv run podfreq generate-candidates --pilot zack-10h-pilot
+uv run podfreq refresh-candidate-metrics
+uv run podfreq inspect-candidate-metrics
 ```
 
 ## Command Reference
@@ -431,6 +437,71 @@ How to use it:
 - run after `tokenize-sentences`
 - second non-force run should mostly increase `skipped_sentences`
 - `--force` rebuilds the selected scope only
+
+### `refresh-candidate-metrics`
+
+What it does:
+- recomputes stored candidate metrics from `token_occurrences`
+- deletes current-version orphan candidates with no occurrence evidence
+- refreshes deterministic `display_text`
+
+Command:
+
+```bash
+uv run podfreq refresh-candidate-metrics
+```
+
+What changes:
+- updates `raw_frequency`
+- updates `episode_dispersion`
+- updates `show_dispersion`
+- updates `display_text`
+
+Output:
+- inventory version
+- selected candidate count
+- refreshed candidate count
+- orphan cleanup count
+- occurrence count
+- metric totals
+- display text update count
+
+How to use it:
+- run after `generate-candidates`
+- reruns should be deterministic
+
+### `inspect-candidate-metrics`
+
+What it does:
+- validates stored candidate metrics against occurrence evidence
+- prints top 1/2/3-gram summaries for manual inspection
+- checks a small set of spoken chunks by candidate key
+
+Commands:
+
+```bash
+uv run podfreq inspect-candidate-metrics
+uv run podfreq inspect-candidate-metrics --limit 5
+uv run podfreq inspect-candidate-metrics --candidate-key "en fait" --candidate-key "du coup"
+```
+
+Inputs:
+- `--limit`: number of top rows per n-gram size
+- `--candidate-key`: optional repeated key for focused inspection
+
+Output:
+- candidate and occurrence counts
+- raw frequency mismatch count
+- episode dispersion mismatch count
+- show dispersion mismatch count
+- display text mismatch count
+- foreign key issue count
+- top 1/2/3-gram rows with frequency and dispersion
+- matching focus rows plus missing requested keys
+
+How to use it:
+- run after `refresh-candidate-metrics`
+- zero mismatch counts means stored metrics match current occurrence evidence
 
 ### `normalize-transcripts`
 

@@ -12,7 +12,13 @@ from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResu
 from podcast_frequency_list.qc.models import QcRunResult
 from podcast_frequency_list.sentences.models import SentenceSplitResult
 from podcast_frequency_list.tokens import CandidateInventoryError
-from podcast_frequency_list.tokens.models import CandidateInventoryResult, TokenizationResult
+from podcast_frequency_list.tokens.models import (
+    CandidateInventoryResult,
+    CandidateMetricsResult,
+    CandidateMetricsValidationResult,
+    CandidateSummaryRow,
+    TokenizationResult,
+)
 
 runner = CliRunner()
 
@@ -297,12 +303,96 @@ class FakeCandidateInventoryService:
         )
 
 
+class FakeCandidateMetricsService:
+    def __init__(self) -> None:
+        self.refresh_calls = 0
+        self.validation_calls = 0
+        self.top_candidate_requests: list[tuple[int, int]] = []
+        self.focus_candidate_requests: list[tuple[str, ...]] = []
+
+    def refresh(self) -> CandidateMetricsResult:
+        self.refresh_calls += 1
+        return CandidateMetricsResult(
+            inventory_version="1",
+            selected_candidates=23,
+            refreshed_candidates=22,
+            deleted_orphan_candidates=1,
+            occurrence_count=92,
+            raw_frequency_total=92,
+            episode_dispersion_total=40,
+            show_dispersion_total=22,
+            display_text_updates=5,
+        )
+
+    def validate(self) -> CandidateMetricsValidationResult:
+        self.validation_calls += 1
+        return CandidateMetricsValidationResult(
+            inventory_version="1",
+            candidate_count=22,
+            occurrence_count=92,
+            raw_frequency_mismatch_count=0,
+            episode_dispersion_mismatch_count=0,
+            show_dispersion_mismatch_count=0,
+            display_text_mismatch_count=0,
+            foreign_key_issue_count=0,
+        )
+
+    def list_top_candidates(
+        self,
+        *,
+        ngram_size: int,
+        limit: int = 20,
+        inventory_version: str = "1",
+    ) -> tuple[CandidateSummaryRow, ...]:
+        self.top_candidate_requests.append((ngram_size, limit))
+        return (
+            CandidateSummaryRow(
+                candidate_key=f"candidate-{ngram_size}",
+                display_text=f"candidate {ngram_size}",
+                ngram_size=ngram_size,
+                raw_frequency=10 * ngram_size,
+                episode_dispersion=ngram_size + 1,
+                show_dispersion=1,
+            ),
+        )
+
+    def list_candidates_by_key(
+        self,
+        *,
+        candidate_keys: tuple[str, ...] | list[str],
+        inventory_version: str = "1",
+    ) -> tuple[CandidateSummaryRow, ...]:
+        requested_keys = tuple(candidate_keys)
+        self.focus_candidate_requests.append(requested_keys)
+
+        rows: list[CandidateSummaryRow] = []
+        for key in requested_keys:
+            if key == "missing":
+                continue
+            rows.append(
+                CandidateSummaryRow(
+                    candidate_key=key,
+                    display_text=key,
+                    ngram_size=max(1, len(key.split())),
+                    raw_frequency=7,
+                    episode_dispersion=3,
+                    show_dispersion=1,
+                )
+            )
+        return tuple(rows)
+
+    def close(self) -> None:
+        return None
+
+
 def test_cli_help() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
     assert "CLI for building the podcast-based French frequency deck." in result.stdout
     assert "generate-candidates" in result.stdout
+    assert "refresh-candidate-metrics" in result.stdout
+    assert "inspect-candidate-metrics" in result.stdout
 
 
 def test_init_db_creates_database(tmp_path, monkeypatch) -> None:
@@ -729,5 +819,114 @@ def test_generate_candidates_with_both_scopes_fails(tmp_path, monkeypatch) -> No
 
     assert result.exit_code == 1
     assert "error=provide exactly one of pilot_name or episode_id" in result.stdout
+
+    load_settings.cache_clear()
+
+
+def test_refresh_candidate_metrics_prints_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateMetricsService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_metrics_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(app, ["refresh-candidate-metrics"])
+
+    assert result.exit_code == 0
+    assert result.stdout.splitlines() == [
+        "inventory_version=1",
+        "selected_candidates=23",
+        "refreshed_candidates=22",
+        "deleted_orphan_candidates=1",
+        "occurrence_count=92",
+        "raw_frequency_total=92",
+        "episode_dispersion_total=40",
+        "show_dispersion_total=22",
+        "display_text_updates=5",
+    ]
+    assert fake_service.refresh_calls == 1
+
+    load_settings.cache_clear()
+
+
+def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateMetricsService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_metrics_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "inspect-candidate-metrics",
+            "--limit",
+            "2",
+            "--candidate-key",
+            "en fait",
+            "--candidate-key",
+            "missing",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "candidate_count=22" in result.stdout
+    assert "raw_frequency_mismatch_count=0" in result.stdout
+    assert "top_candidate_count_1gram=1" in result.stdout
+    assert "top_candidate_count_2gram=1" in result.stdout
+    assert "top_candidate_count_3gram=1" in result.stdout
+    assert (
+        "record=top_2gram\trank=1\tcandidate_key=candidate-2\tdisplay_text=candidate 2"
+        in result.stdout
+    )
+    assert (
+        "record=focus_candidate\trank=1\tcandidate_key=en fait\tdisplay_text=en fait"
+        in result.stdout
+    )
+    assert "focus_missing_count=1" in result.stdout
+    assert "focus_missing=missing" in result.stdout
+    assert fake_service.validation_calls == 1
+    assert fake_service.top_candidate_requests == [(1, 2), (2, 2), (3, 2)]
+    assert fake_service.focus_candidate_requests == [("en fait", "missing")]
+
+    load_settings.cache_clear()
+
+
+def test_inspect_candidate_metrics_fails_without_candidates(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateMetricsService()
+    fake_service.validate = lambda: CandidateMetricsValidationResult(
+        inventory_version="1",
+        candidate_count=0,
+        occurrence_count=0,
+        raw_frequency_mismatch_count=0,
+        episode_dispersion_mismatch_count=0,
+        show_dispersion_mismatch_count=0,
+        display_text_mismatch_count=0,
+        foreign_key_issue_count=0,
+    )
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_metrics_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(app, ["inspect-candidate-metrics"])
+
+    assert result.exit_code == 1
+    assert "error=no token candidates found for inventory inspection" in result.stdout
 
     load_settings.cache_clear()
