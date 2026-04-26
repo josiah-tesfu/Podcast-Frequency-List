@@ -351,6 +351,10 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     bootstrap_database(db_path)
 
     with connect(db_path) as connection:
+        candidate_columns = {
+            row["name"]: row
+            for row in connection.execute("PRAGMA table_info(token_candidates)").fetchall()
+        }
         tables = {
             row["name"]
             for row in connection.execute(
@@ -375,6 +379,32 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
 
     assert {"token_candidates", "token_occurrences"} <= tables
     assert {
+        "episode_dispersion",
+        "show_dispersion",
+        "t_score",
+        "npmi",
+        "left_context_type_count",
+        "right_context_type_count",
+        "left_entropy",
+        "right_entropy",
+    } <= candidate_columns.keys()
+    assert candidate_columns["episode_dispersion"]["notnull"] == 1
+    assert candidate_columns["episode_dispersion"]["dflt_value"] == "0"
+    assert candidate_columns["show_dispersion"]["notnull"] == 1
+    assert candidate_columns["show_dispersion"]["dflt_value"] == "0"
+    assert candidate_columns["t_score"]["notnull"] == 0
+    assert candidate_columns["t_score"]["dflt_value"] is None
+    assert candidate_columns["npmi"]["notnull"] == 0
+    assert candidate_columns["npmi"]["dflt_value"] is None
+    assert candidate_columns["left_context_type_count"]["notnull"] == 0
+    assert candidate_columns["left_context_type_count"]["dflt_value"] is None
+    assert candidate_columns["right_context_type_count"]["notnull"] == 0
+    assert candidate_columns["right_context_type_count"]["dflt_value"] is None
+    assert candidate_columns["left_entropy"]["notnull"] == 0
+    assert candidate_columns["left_entropy"]["dflt_value"] is None
+    assert candidate_columns["right_entropy"]["notnull"] == 0
+    assert candidate_columns["right_entropy"]["dflt_value"] is None
+    assert {
         "idx_token_candidates_inventory_version",
         "idx_token_candidates_ngram_size",
         "idx_token_candidates_frequency",
@@ -384,6 +414,196 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         "idx_token_occurrences_scope",
     } <= indexes
     assert foreign_key_issues == []
+
+
+def test_bootstrap_migrates_candidate_metric_columns_from_v9_schema(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency
+            )
+            VALUES ('1', 'en fait', 'en fait', 2, 7)
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        candidate_columns = {
+            row["name"]: row
+            for row in connection.execute("PRAGMA table_info(token_candidates)").fetchall()
+        }
+        row = connection.execute(
+            """
+            SELECT
+                candidate_key,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion
+            FROM token_candidates
+            WHERE candidate_key = 'en fait'
+            """
+        ).fetchone()
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert {
+        "episode_dispersion",
+        "show_dispersion",
+    } <= candidate_columns.keys()
+    assert row["raw_frequency"] == 7
+    assert row["episode_dispersion"] == 0
+    assert row["show_dispersion"] == 0
+    assert schema_version == SCHEMA_VERSION
+    assert foreign_key_issues == []
+
+
+def test_bootstrap_migrates_step4_columns_from_v10_schema(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+                show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion
+            )
+            VALUES ('1', 'en fait', 'en fait', 2, 7, 3, 2)
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        candidate_columns = {
+            row["name"]: row
+            for row in connection.execute("PRAGMA table_info(token_candidates)").fetchall()
+        }
+        row = connection.execute(
+            """
+            SELECT
+                candidate_key,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                t_score,
+                npmi,
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy
+            FROM token_candidates
+            WHERE candidate_key = 'en fait'
+            """
+        ).fetchone()
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert {
+        "t_score",
+        "npmi",
+        "left_context_type_count",
+        "right_context_type_count",
+        "left_entropy",
+        "right_entropy",
+    } <= candidate_columns.keys()
+    assert row["raw_frequency"] == 7
+    assert row["episode_dispersion"] == 3
+    assert row["show_dispersion"] == 2
+    assert row["t_score"] is None
+    assert row["npmi"] is None
+    assert row["left_context_type_count"] is None
+    assert row["right_context_type_count"] is None
+    assert row["left_entropy"] is None
+    assert row["right_entropy"] is None
+    assert schema_version == SCHEMA_VERSION
+    assert foreign_key_issues == []
+
+
+def test_step4_columns_default_to_null_for_one_gram_candidates(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        candidate_id = _insert_candidate(
+            connection,
+            candidate_key="bonjour",
+            display_text="bonjour",
+            ngram_size=1,
+        )
+        row = connection.execute(
+            """
+            SELECT
+                t_score,
+                npmi,
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy
+            FROM token_candidates
+            WHERE candidate_id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+
+    assert row["t_score"] is None
+    assert row["npmi"] is None
+    assert row["left_context_type_count"] is None
+    assert row["right_context_type_count"] is None
+    assert row["left_entropy"] is None
+    assert row["right_entropy"] is None
 
 
 def test_token_candidates_are_unique_per_inventory_version(tmp_path) -> None:

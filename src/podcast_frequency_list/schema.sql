@@ -204,6 +204,18 @@ CREATE TABLE IF NOT EXISTS token_candidates (
     display_text TEXT NOT NULL,
     ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
     raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+    episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+    show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+    t_score REAL,
+    npmi REAL,
+    left_context_type_count INTEGER
+        CHECK (left_context_type_count IS NULL OR left_context_type_count >= 0),
+    right_context_type_count INTEGER
+        CHECK (right_context_type_count IS NULL OR right_context_type_count >= 0),
+    left_entropy REAL
+        CHECK (left_entropy IS NULL OR left_entropy >= 0),
+    right_entropy REAL
+        CHECK (right_entropy IS NULL OR right_entropy >= 0),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (inventory_version, candidate_key),

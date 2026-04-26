@@ -3,9 +3,16 @@ from podcast_frequency_list.tokens.inventory import (
     CandidateInventoryError,
     CandidateInventoryService,
 )
+from podcast_frequency_list.tokens.metrics import (
+    CandidateMetricsError,
+    CandidateMetricsService,
+)
 from podcast_frequency_list.tokens.models import (
     CandidateInventoryResult,
+    CandidateMetricsResult,
+    CandidateMetricsValidationResult,
     CandidateSpan,
+    CandidateSummaryRow,
     SentenceToken,
     TokenizationResult,
 )
@@ -26,6 +33,11 @@ __all__ = [
     "CandidateInventoryError",
     "CandidateInventoryResult",
     "CandidateInventoryService",
+    "CandidateMetricsError",
+    "CandidateMetricsResult",
+    "CandidateMetricsService",
+    "CandidateMetricsValidationResult",
+    "CandidateSummaryRow",
     "CandidateSpan",
     "INVENTORY_VERSION",
     "TOKENIZATION_VERSION",

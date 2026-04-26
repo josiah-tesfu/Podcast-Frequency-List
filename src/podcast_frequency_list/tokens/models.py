@@ -51,3 +51,38 @@ class CandidateInventoryResult:
     created_candidates: int
     created_occurrences: int
     episode_count: int
+
+
+@dataclass(frozen=True)
+class CandidateMetricsResult:
+    inventory_version: str
+    selected_candidates: int
+    refreshed_candidates: int
+    deleted_orphan_candidates: int
+    occurrence_count: int
+    raw_frequency_total: int
+    episode_dispersion_total: int
+    show_dispersion_total: int
+    display_text_updates: int
+
+
+@dataclass(frozen=True)
+class CandidateMetricsValidationResult:
+    inventory_version: str
+    candidate_count: int
+    occurrence_count: int
+    raw_frequency_mismatch_count: int
+    episode_dispersion_mismatch_count: int
+    show_dispersion_mismatch_count: int
+    display_text_mismatch_count: int
+    foreign_key_issue_count: int
+
+
+@dataclass(frozen=True)
+class CandidateSummaryRow:
+    candidate_key: str
+    display_text: str
+    ngram_size: int
+    raw_frequency: int
+    episode_dispersion: int
+    show_dispersion: int

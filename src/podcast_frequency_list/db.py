@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "9"
+SCHEMA_VERSION = "11"
 
 
 def get_schema_path() -> Path:
@@ -36,6 +36,7 @@ def bootstrap_database(db_path: Path | None = None) -> Path:
     try:
         migrate_legacy_schema(connection)
         connection.executescript(load_schema())
+        migrate_token_candidate_schema(connection)
         connection.execute(
             """
             INSERT INTO app_meta (key, value)
@@ -105,6 +106,85 @@ def migrate_legacy_schema(connection: sqlite3.Connection) -> None:
     connection.execute("ALTER TABLE shows_migrated RENAME TO shows")
     connection.execute("PRAGMA foreign_keys = ON;")
     connection.commit()
+
+
+_TOKEN_CANDIDATE_MIGRATIONS = (
+    (
+        "episode_dispersion",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN episode_dispersion INTEGER NOT NULL DEFAULT 0
+        CHECK (episode_dispersion >= 0)
+        """,
+    ),
+    (
+        "show_dispersion",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN show_dispersion INTEGER NOT NULL DEFAULT 0
+        CHECK (show_dispersion >= 0)
+        """,
+    ),
+    (
+        "t_score",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN t_score REAL
+        """,
+    ),
+    (
+        "npmi",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN npmi REAL
+        """,
+    ),
+    (
+        "left_context_type_count",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN left_context_type_count INTEGER
+        CHECK (left_context_type_count IS NULL OR left_context_type_count >= 0)
+        """,
+    ),
+    (
+        "right_context_type_count",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN right_context_type_count INTEGER
+        CHECK (right_context_type_count IS NULL OR right_context_type_count >= 0)
+        """,
+    ),
+    (
+        "left_entropy",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN left_entropy REAL
+        CHECK (left_entropy IS NULL OR left_entropy >= 0)
+        """,
+    ),
+    (
+        "right_entropy",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN right_entropy REAL
+        CHECK (right_entropy IS NULL OR right_entropy >= 0)
+        """,
+    ),
+)
+
+
+def migrate_token_candidate_schema(connection: sqlite3.Connection) -> None:
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(token_candidates)")
+    }
+    if not columns:
+        return
+
+    for column_name, migration_sql in _TOKEN_CANDIDATE_MIGRATIONS:
+        if column_name not in columns:
+            connection.execute(migration_sql)
 
 
 def upsert_show(
@@ -372,6 +452,7 @@ __all__ = [
     "get_schema_path",
     "get_show_by_id",
     "load_schema",
+    "migrate_token_candidate_schema",
     "migrate_legacy_schema",
     "update_show",
     "upsert_episode",
