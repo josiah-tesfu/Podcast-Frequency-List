@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass
 from sqlite3 import Connection
 
+from podcast_frequency_list.tokens.service import TOKENIZATION_VERSION
+
 _SUPPORTED_NGRAM_SIZES = frozenset({2, 3})
 
 
@@ -29,12 +31,14 @@ class _AssociationStore:
 
     def refresh(self) -> None:
         candidate_rows = self._load_candidate_rows()
+        span_frequency_by_key = self._load_fallback_span_frequencies()
         unigram_total = sum(
             row.raw_frequency for row in candidate_rows if row.ngram_size == 1
         )
         refresh_rows = tuple(
             self._build_refresh_rows(
                 candidate_rows=candidate_rows,
+                span_frequency_by_key=span_frequency_by_key,
                 unigram_total=unigram_total,
             )
         )
@@ -70,10 +74,47 @@ class _AssociationStore:
             for row in rows
         )
 
+    def _load_fallback_span_frequencies(self) -> dict[str, int]:
+        rows = self.connection.execute(
+            """
+            WITH scoped_tokens AS (
+                SELECT
+                    st.sentence_id,
+                    st.token_index,
+                    st.token_key
+                FROM sentence_tokens st
+                JOIN (
+                    SELECT DISTINCT sentence_id
+                    FROM token_occurrences
+                    WHERE inventory_version = ?
+                ) scoped_sentences
+                    ON scoped_sentences.sentence_id = st.sentence_id
+                WHERE st.tokenization_version = ?
+            )
+            SELECT span_key, COUNT(*) AS raw_frequency
+            FROM (
+                SELECT token_key AS span_key
+                FROM scoped_tokens
+
+                UNION ALL
+
+                SELECT first.token_key || ' ' || second.token_key AS span_key
+                FROM scoped_tokens first
+                JOIN scoped_tokens second
+                    ON second.sentence_id = first.sentence_id
+                    AND second.token_index = first.token_index + 1
+            )
+            GROUP BY span_key
+            """,
+            (self.inventory_version, TOKENIZATION_VERSION),
+        ).fetchall()
+        return {str(row["span_key"]): int(row["raw_frequency"]) for row in rows}
+
     def _build_refresh_rows(
         self,
         *,
         candidate_rows: tuple[_CandidateFrequencyRow, ...],
+        span_frequency_by_key: dict[str, int],
         unigram_total: int,
     ) -> tuple[_AssociationRefreshRow, ...]:
         frequency_by_key = {row.candidate_key: row.raw_frequency for row in candidate_rows}
@@ -89,6 +130,7 @@ class _AssociationStore:
                 _calculate_candidate_metrics(
                     candidate_row=row,
                     frequency_by_key=frequency_by_key,
+                    span_frequency_by_key=span_frequency_by_key,
                     unigram_total=unigram_total,
                 ),
             )
@@ -116,6 +158,7 @@ def _calculate_candidate_metrics(
     *,
     candidate_row: _CandidateFrequencyRow,
     frequency_by_key: dict[str, int],
+    span_frequency_by_key: dict[str, int],
     unigram_total: int,
 ) -> tuple[float | None, float | None]:
     split_keys = _split_candidate_key(
@@ -130,8 +173,16 @@ def _calculate_candidate_metrics(
     npmi_scores: list[float] = []
 
     for left_key, right_key in split_keys:
-        left_frequency = frequency_by_key.get(left_key)
-        right_frequency = frequency_by_key.get(right_key)
+        left_frequency = _lookup_frequency(
+            lookup_key=left_key,
+            frequency_by_key=frequency_by_key,
+            span_frequency_by_key=span_frequency_by_key,
+        )
+        right_frequency = _lookup_frequency(
+            lookup_key=right_key,
+            frequency_by_key=frequency_by_key,
+            span_frequency_by_key=span_frequency_by_key,
+        )
         if left_frequency is None or right_frequency is None:
             return None, None
 
@@ -157,6 +208,18 @@ def _calculate_candidate_metrics(
         npmi_scores.append(npmi)
 
     return min(t_scores), min(npmi_scores)
+
+
+def _lookup_frequency(
+    *,
+    lookup_key: str,
+    frequency_by_key: dict[str, int],
+    span_frequency_by_key: dict[str, int],
+) -> int | None:
+    candidate_frequency = frequency_by_key.get(lookup_key)
+    if candidate_frequency is not None:
+        return candidate_frequency
+    return span_frequency_by_key.get(lookup_key)
 
 
 def _split_candidate_key(*, candidate_key: str, ngram_size: int) -> tuple[tuple[str, str], ...]:

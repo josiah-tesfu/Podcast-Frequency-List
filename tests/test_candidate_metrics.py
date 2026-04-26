@@ -313,6 +313,13 @@ def _insert_occurrence_bundle(
         guid=guid,
         sentence_text=sentence_text,
     )
+    _insert_sentence_tokens(
+        connection,
+        sentence_id=sentence_id,
+        episode_id=episode_id,
+        segment_id=segment_id,
+        sentence_text=sentence_text,
+    )
     for (
         candidate_id,
         token_start_index,
@@ -1160,6 +1167,228 @@ def test_candidate_metrics_service_association_refresh_is_idempotent(tmp_path) -
         )
 
     assert second_row == first_row
+
+
+def test_candidate_metrics_service_refreshes_association_for_filtered_split_unigrams(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        ai_id = _insert_candidate(
+            connection,
+            candidate_key="ai",
+            display_text="ai",
+            ngram_size=1,
+        )
+        j_ai_id = _insert_candidate(
+            connection,
+            candidate_key="j ai",
+            display_text="j'ai",
+            ngram_size=2,
+        )
+        bonjour_id = _insert_candidate(
+            connection,
+            candidate_key="bonjour",
+            display_text="bonjour",
+            ngram_size=1,
+        )
+
+        for index in range(4):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid=f"ep-association-clitic-shared-{index}",
+                sentence_text="j ai",
+                occurrences=(
+                    (ai_id, 1, 2, 2, 4, "ai"),
+                    (j_ai_id, 0, 2, 0, 4, "j ai"),
+                ),
+            )
+
+        for index in range(2):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid=f"ep-association-clitic-ai-{index}",
+                sentence_text="ai",
+                occurrences=((ai_id, 0, 1, 0, 2, "ai"),),
+            )
+
+        for index in range(4):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid=f"ep-association-clitic-bonjour-{index}",
+                sentence_text="bonjour",
+                occurrences=((bonjour_id, 0, 1, 0, 7, "bonjour"),),
+            )
+
+        connection.commit()
+
+    CandidateMetricsService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT raw_frequency, t_score, npmi
+            FROM token_candidates
+            WHERE candidate_id = ?
+            """,
+            (j_ai_id,),
+        ).fetchone()
+
+    assert row["raw_frequency"] == 4
+    assert row["t_score"] == pytest.approx(
+        _t_score(
+            observed=4,
+            left_frequency=4,
+            right_frequency=6,
+            total_unigrams=10,
+        )
+    )
+    assert row["npmi"] == pytest.approx(
+        _npmi(
+            observed=4,
+            left_frequency=4,
+            right_frequency=6,
+            total_unigrams=10,
+        )
+    )
+
+
+def test_candidate_metrics_service_refreshes_association_for_filtered_numeric_split_bigrams(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        bonjour_id = _insert_candidate(
+            connection,
+            candidate_key="bonjour",
+            display_text="bonjour",
+            ngram_size=1,
+        )
+        trente_trois_bonjour_id = _insert_candidate(
+            connection,
+            candidate_key="33 bonjour",
+            display_text="33 bonjour",
+            ngram_size=2,
+        )
+        grand_chunk_id = _insert_candidate(
+            connection,
+            candidate_key="22 33 bonjour",
+            display_text="22 33 bonjour",
+            ngram_size=3,
+        )
+        salut_id = _insert_candidate(
+            connection,
+            candidate_key="salut",
+            display_text="salut",
+            ngram_size=1,
+        )
+
+        for index in range(3):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid=f"ep-association-numeric-shared-{index}",
+                sentence_text="22 33 bonjour",
+                occurrences=(
+                    (bonjour_id, 2, 3, 6, 13, "bonjour"),
+                    (trente_trois_bonjour_id, 1, 3, 3, 13, "33 bonjour"),
+                    (grand_chunk_id, 0, 3, 0, 13, "22 33 bonjour"),
+                ),
+            )
+
+        for index in range(2):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid=f"ep-association-numeric-bigram-{index}",
+                sentence_text="33 bonjour",
+                occurrences=(
+                    (bonjour_id, 1, 2, 3, 10, "bonjour"),
+                    (trente_trois_bonjour_id, 0, 2, 0, 10, "33 bonjour"),
+                ),
+            )
+
+        for index in range(2):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid=f"ep-association-numeric-bonjour-{index}",
+                sentence_text="bonjour",
+                occurrences=((bonjour_id, 0, 1, 0, 7, "bonjour"),),
+            )
+
+        for index in range(5):
+            _insert_occurrence_bundle(
+                connection,
+                show_id=show_id,
+                guid=f"ep-association-numeric-salut-{index}",
+                sentence_text="salut",
+                occurrences=((salut_id, 0, 1, 0, 5, "salut"),),
+            )
+
+        connection.commit()
+
+    CandidateMetricsService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT raw_frequency, t_score, npmi
+            FROM token_candidates
+            WHERE candidate_id = ?
+            """,
+            (grand_chunk_id,),
+        ).fetchone()
+
+    expected_t_score = min(
+        _t_score(
+            observed=3,
+            left_frequency=3,
+            right_frequency=5,
+            total_unigrams=12,
+        ),
+        _t_score(
+            observed=3,
+            left_frequency=3,
+            right_frequency=7,
+            total_unigrams=12,
+        ),
+    )
+    expected_npmi = min(
+        _npmi(
+            observed=3,
+            left_frequency=3,
+            right_frequency=5,
+            total_unigrams=12,
+        ),
+        _npmi(
+            observed=3,
+            left_frequency=3,
+            right_frequency=7,
+            total_unigrams=12,
+        ),
+    )
+
+    assert row["raw_frequency"] == 3
+    assert row["t_score"] == pytest.approx(expected_t_score)
+    assert row["npmi"] == pytest.approx(expected_npmi)
 
 
 def test_candidate_metrics_service_errors_without_candidates(tmp_path) -> None:

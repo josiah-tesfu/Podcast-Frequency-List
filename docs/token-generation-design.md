@@ -1503,12 +1503,38 @@ DB validation:
 
 Sanity checks:
 
-- `en fait`, `du coup`, `il y a`, `je pense`, `tu vois` are still visible
-- those chunks show stronger cohesion or tighter boundary behavior than obvious
-  glue phrases
+- `en fait`, `du coup`, `il y a`, `je pense`, `tu vois` are still visible in
+  focused inspection
+- contraction-heavy chunks such as `c'est`, `j'ai`, `n'est pas`, and
+  `c'est un` still receive populated association metrics rather than unexpected
+  `NULL`s
+- number-heavy spans such as `100 000 clients` or similar multiword numeric
+  chunks still receive populated association metrics when their internal split
+  parts are valid sentence spans
+- strong spoken chunks such as `du coup`, `en fait`, `il y a`, `je pense`, and
+  `tu vois` show materially stronger cohesion than obvious glue phrases such as
+  `de la`, `que je`, and `et le`
+- rare but cohesive chunks can still show strong `npmi` even when `t_score`
+  stays more modest
 - high-frequency glue phrases remain visible for inspection rather than being
-  silently pruned
-- boundary sentinels do not create strange missing-value patterns
+  silently pruned or hidden by the reporting surface
+- top `1`-gram inspection stays frequency-and-dispersion only, with no fake
+  Step 4 values introduced for `1`-grams
+- top `2`-gram and `3`-gram inspection rows expose both association and
+  boundary metrics alongside the existing Step 3 facts
+- focused candidate inspection shows the same stored Step 4 values as the DB
+  for manually requested keys
+- `1`-gram Step 4 fields remain `NULL` after refresh
+- multiword candidates with occurrence evidence do not retain `NULL` Step 4
+  fields after refresh
+- clause-edge chunks do not lose boundary metrics just because one side uses
+  `__BOS__` or `__EOS__`
+- boundary sentinels do not create strange missing-value patterns or collapse
+  otherwise valid context distributions
+- repeated refreshes leave candidate counts, mismatch counts, and Step 4 values
+  unchanged apart from legitimate `display_text` normalization on the first run
+- Step 4 inspection remains factual only: no new ranking surface, no pruning,
+  and no candidate disappearance caused by the refresh itself
 
 Tests:
 
@@ -1583,31 +1609,33 @@ Output:
 
 ## Recommended Immediate Next Step
 
-Step 3A through 3D are implemented through metrics schema, deterministic metrics
-refresh, candidate inspection commands, and pilot-scale validation.
+Step 4A through 4E are implemented through unithood metric schema, deterministic
+association and boundary refresh, candidate inspection commands, and pilot-scale
+validation.
 
-Step 4 should now be implemented as explicit substeps 4A through 4E.
+Step 5 should now be implemented as explicit substeps.
 
 Current completed target:
-
-```text
-token_occurrences -> inspectable stored frequency and dispersion metrics
-```
-
-Next implementation target:
 
 ```text
 stable candidate facts -> stored unithood metrics for multiword candidates
 ```
 
+Next implementation target:
+
+```text
+stored unithood metrics -> redundancy and coverage comparisons between smaller and larger candidates
+```
+
 Reason:
 
-- candidate facts can now be refreshed and inspected from occurrence evidence
-- raw frequency, episode dispersion, show dispersion, and display text can be validated directly
-- top 1/2/3-gram summaries can be inspected without ad hoc SQL
-- Step 4 needs an explicit contract for null semantics, boundary contexts, and
-  association formulas before refresh logic is added
-- splitting Step 4 prevents factual metrics from getting mixed with Step 6
+- candidate facts are now refreshed into inspectable frequency, dispersion,
+  association, and boundary metrics
+- pilot validation shows Step 4 metrics are populated, deterministic, and
+  visible in the existing inspection workflow
+- Step 5 can now compare smaller candidates against larger candidates using a
+  stable unithood base instead of raw frequency alone
+- splitting Step 5 keeps redundancy and coverage behavior separate from Step 6
   ranking policy
 
-Next step: Step 4A, Unithood Metric Contract And Schema.
+Next step: Step 5, Redundancy And Coverage.
