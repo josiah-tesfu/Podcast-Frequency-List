@@ -1,15 +1,26 @@
+import math
+
 import pytest
 
 from podcast_frequency_list.db import bootstrap_database, connect, upsert_episode, upsert_show
 from podcast_frequency_list.tokens import (
     INVENTORY_VERSION,
+    TOKENIZATION_VERSION,
     CandidateMetricsError,
     CandidateMetricsService,
+    generate_sentence_spans,
+    tokenize_sentence_text,
 )
 from podcast_frequency_list.tokens.models import CandidateMetricsValidationResult
 
 
-def _insert_episode_context(connection, *, show_id: int, guid: str) -> tuple[int, int, int]:
+def _insert_episode_context(
+    connection,
+    *,
+    show_id: int,
+    guid: str,
+    sentence_text: str = "en fait",
+) -> tuple[int, int, int]:
     upsert_episode(
         connection,
         show_id=show_id,
@@ -53,7 +64,7 @@ def _insert_episode_context(connection, *, show_id: int, guid: str) -> tuple[int
             )
             VALUES (?, ?, 0, ?)
             """,
-            (source_id, episode_id, "en fait"),
+            (source_id, episode_id, sentence_text),
         ).lastrowid
     )
     sentence_id = int(
@@ -68,9 +79,9 @@ def _insert_episode_context(connection, *, show_id: int, guid: str) -> tuple[int
                 char_end,
                 sentence_text
             )
-            VALUES (?, ?, '1', 0, 0, 7, ?)
+            VALUES (?, ?, '1', 0, 0, ?, ?)
             """,
-            (segment_id, episode_id, "en fait"),
+            (segment_id, episode_id, len(sentence_text), sentence_text),
         ).lastrowid
     )
     return episode_id, segment_id, sentence_id
@@ -123,6 +134,10 @@ def _insert_occurrence(
     segment_id: int,
     surface_text: str,
     inventory_version: str = INVENTORY_VERSION,
+    token_start_index: int = 0,
+    token_end_index: int = 2,
+    char_start: int = 0,
+    char_end: int | None = None,
 ) -> None:
     connection.execute(
         """
@@ -138,7 +153,7 @@ def _insert_occurrence(
             char_end,
             surface_text
         )
-        VALUES (?, ?, ?, ?, ?, 0, 2, 0, 7, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             candidate_id,
@@ -146,9 +161,101 @@ def _insert_occurrence(
             episode_id,
             segment_id,
             inventory_version,
+            token_start_index,
+            token_end_index,
+            char_start,
+            len(surface_text) if char_end is None else char_end,
             surface_text,
         ),
     )
+
+
+def _insert_sentence_tokens(
+    connection,
+    *,
+    sentence_id: int,
+    episode_id: int,
+    segment_id: int,
+    sentence_text: str,
+):
+    tokens = tokenize_sentence_text(sentence_text)
+    for token in tokens:
+        connection.execute(
+            """
+            INSERT INTO sentence_tokens (
+                sentence_id,
+                episode_id,
+                segment_id,
+                tokenization_version,
+                token_index,
+                token_key,
+                surface_text,
+                char_start,
+                char_end,
+                token_type
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                sentence_id,
+                episode_id,
+                segment_id,
+                TOKENIZATION_VERSION,
+                token.token_index,
+                token.token_key,
+                token.surface_text,
+                token.char_start,
+                token.char_end,
+                token.token_type,
+            ),
+        )
+    return tokens
+
+
+def _insert_occurrence_from_sentence(
+    connection,
+    *,
+    candidate_id: int,
+    sentence_id: int,
+    episode_id: int,
+    segment_id: int,
+    sentence_text: str,
+    candidate_key: str,
+    inventory_version: str = INVENTORY_VERSION,
+) -> None:
+    tokens = _insert_sentence_tokens(
+        connection,
+        sentence_id=sentence_id,
+        episode_id=episode_id,
+        segment_id=segment_id,
+        sentence_text=sentence_text,
+    )
+    spans = generate_sentence_spans(
+        sentence_id=sentence_id,
+        episode_id=episode_id,
+        segment_id=segment_id,
+        sentence_text=sentence_text,
+        tokens=tokens,
+    )
+    span = next(span for span in spans if span.candidate_key == candidate_key)
+    _insert_occurrence(
+        connection,
+        candidate_id=candidate_id,
+        sentence_id=sentence_id,
+        episode_id=episode_id,
+        segment_id=segment_id,
+        inventory_version=inventory_version,
+        token_start_index=span.token_start_index,
+        token_end_index=span.token_end_index,
+        char_start=span.char_start,
+        char_end=span.char_end,
+        surface_text=span.surface_text,
+    )
+
+
+def _entropy(*counts: int) -> float:
+    total = sum(counts)
+    return -sum((count / total) * math.log(count / total) for count in counts)
 
 
 def test_candidate_metrics_service_refreshes_metrics_and_display_text(tmp_path) -> None:
@@ -324,6 +431,276 @@ def test_candidate_metrics_service_refresh_is_idempotent(tmp_path) -> None:
     assert second_result.occurrence_count == 1
     assert second_result.raw_frequency_total == 1
     assert second_result.display_text_updates == 0
+
+
+def test_candidate_metrics_service_refreshes_boundary_metrics(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        candidate_id = _insert_candidate(
+            connection,
+            candidate_key="en fait",
+            display_text="En fait",
+        )
+        contexts = (
+            _insert_episode_context(
+                connection,
+                show_id=show_id,
+                guid="ep-1",
+                sentence_text="En fait oui",
+            ),
+            _insert_episode_context(
+                connection,
+                show_id=show_id,
+                guid="ep-2",
+                sentence_text="bon en fait",
+            ),
+            _insert_episode_context(
+                connection,
+                show_id=show_id,
+                guid="ep-3",
+                sentence_text="bon en fait oui",
+            ),
+        )
+
+        for context, sentence_text in zip(
+            contexts,
+            ("En fait oui", "bon en fait", "bon en fait oui"),
+            strict=True,
+        ):
+            episode_id, segment_id, sentence_id = context
+            _insert_occurrence_from_sentence(
+                connection,
+                candidate_id=candidate_id,
+                sentence_id=sentence_id,
+                episode_id=episode_id,
+                segment_id=segment_id,
+                sentence_text=sentence_text,
+                candidate_key="en fait",
+            )
+
+        connection.commit()
+
+    CandidateMetricsService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy
+            FROM token_candidates
+            WHERE candidate_id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+
+    assert row["left_context_type_count"] == 2
+    assert row["right_context_type_count"] == 2
+    assert row["left_entropy"] == pytest.approx(_entropy(2, 1))
+    assert row["right_entropy"] == pytest.approx(_entropy(2, 1))
+
+
+def test_candidate_metrics_service_refreshes_fixed_boundary_contexts_to_zero_entropy(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        candidate_id = _insert_candidate(
+            connection,
+            candidate_key="en fait",
+            display_text="En fait",
+        )
+        contexts = (
+            _insert_episode_context(
+                connection,
+                show_id=show_id,
+                guid="ep-1",
+                sentence_text="bon en fait oui",
+            ),
+            _insert_episode_context(
+                connection,
+                show_id=show_id,
+                guid="ep-2",
+                sentence_text="bon en fait oui",
+            ),
+        )
+
+        for episode_id, segment_id, sentence_id in contexts:
+            _insert_occurrence_from_sentence(
+                connection,
+                candidate_id=candidate_id,
+                sentence_id=sentence_id,
+                episode_id=episode_id,
+                segment_id=segment_id,
+                sentence_text="bon en fait oui",
+                candidate_key="en fait",
+            )
+
+        connection.commit()
+
+    CandidateMetricsService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy
+            FROM token_candidates
+            WHERE candidate_id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+
+    assert row["left_context_type_count"] == 1
+    assert row["right_context_type_count"] == 1
+    assert row["left_entropy"] == pytest.approx(0.0)
+    assert row["right_entropy"] == pytest.approx(0.0)
+
+
+def test_candidate_metrics_service_keeps_one_gram_boundary_metrics_null(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        episode_id, segment_id, sentence_id = _insert_episode_context(
+            connection,
+            show_id=show_id,
+            guid="ep-1",
+            sentence_text="bonjour oui",
+        )
+        candidate_id = _insert_candidate(
+            connection,
+            candidate_key="bonjour",
+            display_text="bonjour",
+            ngram_size=1,
+        )
+        _insert_occurrence_from_sentence(
+            connection,
+            candidate_id=candidate_id,
+            sentence_id=sentence_id,
+            episode_id=episode_id,
+            segment_id=segment_id,
+            sentence_text="bonjour oui",
+            candidate_key="bonjour",
+        )
+        connection.commit()
+
+    CandidateMetricsService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy
+            FROM token_candidates
+            WHERE candidate_id = ?
+            """,
+            (candidate_id,),
+        ).fetchone()
+
+    assert row["left_context_type_count"] is None
+    assert row["right_context_type_count"] is None
+    assert row["left_entropy"] is None
+    assert row["right_entropy"] is None
+
+
+def test_candidate_metrics_service_boundary_refresh_is_idempotent(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        episode_id, segment_id, sentence_id = _insert_episode_context(
+            connection,
+            show_id=show_id,
+            guid="ep-1",
+            sentence_text="bon en fait oui",
+        )
+        candidate_id = _insert_candidate(
+            connection,
+            candidate_key="en fait",
+            display_text="En fait",
+        )
+        _insert_occurrence_from_sentence(
+            connection,
+            candidate_id=candidate_id,
+            sentence_id=sentence_id,
+            episode_id=episode_id,
+            segment_id=segment_id,
+            sentence_text="bon en fait oui",
+            candidate_key="en fait",
+        )
+        connection.commit()
+
+    service = CandidateMetricsService(db_path=db_path)
+    service.refresh()
+
+    with connect(db_path) as connection:
+        first_row = tuple(
+            connection.execute(
+                """
+                SELECT
+                    left_context_type_count,
+                    right_context_type_count,
+                    left_entropy,
+                    right_entropy
+                FROM token_candidates
+                WHERE candidate_id = ?
+                """,
+                (candidate_id,),
+            ).fetchone()
+        )
+
+    service.refresh()
+
+    with connect(db_path) as connection:
+        second_row = tuple(
+            connection.execute(
+                """
+                SELECT
+                    left_context_type_count,
+                    right_context_type_count,
+                    left_entropy,
+                    right_entropy
+                FROM token_candidates
+                WHERE candidate_id = ?
+                """,
+                (candidate_id,),
+            ).fetchone()
+        )
+
+    assert second_row == first_row
 
 
 def test_candidate_metrics_service_errors_without_candidates(tmp_path) -> None:
