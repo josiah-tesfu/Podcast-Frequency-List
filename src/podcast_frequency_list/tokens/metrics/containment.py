@@ -30,6 +30,41 @@ class _ContainmentStore:
         )
         self.connection.execute(
             f"""
+            WITH pair_matches AS (
+                SELECT
+                    small_occ.candidate_id AS smaller_candidate_id,
+                    big_occ.candidate_id AS larger_candidate_id,
+                    CASE
+                        WHEN big_occ.token_start_index = small_occ.token_start_index - 1
+                            AND big_occ.token_end_index = small_occ.token_end_index
+                        THEN 'left'
+                        ELSE 'right'
+                    END AS extension_side,
+                    small_occ.occurrence_id,
+                    small_occ.episode_id
+                FROM token_occurrences small_occ
+                JOIN token_candidates small_cand
+                    ON small_cand.candidate_id = small_occ.candidate_id
+                    AND small_cand.inventory_version = small_occ.inventory_version
+                JOIN token_occurrences big_occ
+                    ON big_occ.inventory_version = small_occ.inventory_version
+                    AND big_occ.sentence_id = small_occ.sentence_id
+                    AND (
+                        (
+                            big_occ.token_start_index = small_occ.token_start_index - 1
+                            AND big_occ.token_end_index = small_occ.token_end_index
+                        )
+                        OR (
+                            big_occ.token_start_index = small_occ.token_start_index
+                            AND big_occ.token_end_index = small_occ.token_end_index + 1
+                        )
+                    )
+                JOIN token_candidates big_cand
+                    ON big_cand.candidate_id = big_occ.candidate_id
+                    AND big_cand.inventory_version = big_occ.inventory_version
+                WHERE small_occ.inventory_version = ?
+                AND big_cand.ngram_size = small_cand.ngram_size + 1
+            )
             INSERT INTO {_CONTAINMENT_REFRESH_TABLE} (
                 smaller_candidate_id,
                 larger_candidate_id,
@@ -38,42 +73,18 @@ class _ContainmentStore:
                 shared_episode_count
             )
             SELECT
-                small_occ.candidate_id AS smaller_candidate_id,
-                big_occ.candidate_id AS larger_candidate_id,
+                smaller_candidate_id,
+                larger_candidate_id,
                 CASE
-                    WHEN big_occ.token_start_index = small_occ.token_start_index - 1
-                        AND big_occ.token_end_index = small_occ.token_end_index
-                    THEN 'left'
-                    ELSE 'right'
+                    WHEN COUNT(DISTINCT extension_side) = 2 THEN 'both'
+                    ELSE MIN(extension_side)
                 END AS extension_side,
-                COUNT(DISTINCT small_occ.occurrence_id) AS shared_occurrence_count,
-                COUNT(DISTINCT small_occ.episode_id) AS shared_episode_count
-            FROM token_occurrences small_occ
-            JOIN token_candidates small_cand
-                ON small_cand.candidate_id = small_occ.candidate_id
-                AND small_cand.inventory_version = small_occ.inventory_version
-            JOIN token_occurrences big_occ
-                ON big_occ.inventory_version = small_occ.inventory_version
-                AND big_occ.sentence_id = small_occ.sentence_id
-                AND (
-                    (
-                        big_occ.token_start_index = small_occ.token_start_index - 1
-                        AND big_occ.token_end_index = small_occ.token_end_index
-                    )
-                    OR (
-                        big_occ.token_start_index = small_occ.token_start_index
-                        AND big_occ.token_end_index = small_occ.token_end_index + 1
-                    )
-                )
-            JOIN token_candidates big_cand
-                ON big_cand.candidate_id = big_occ.candidate_id
-                AND big_cand.inventory_version = big_occ.inventory_version
-            WHERE small_occ.inventory_version = ?
-            AND big_cand.ngram_size = small_cand.ngram_size + 1
+                COUNT(DISTINCT occurrence_id) AS shared_occurrence_count,
+                COUNT(DISTINCT episode_id) AS shared_episode_count
+            FROM pair_matches
             GROUP BY
-                small_occ.candidate_id,
-                big_occ.candidate_id,
-                extension_side
+                smaller_candidate_id,
+                larger_candidate_id
             """,
             (self.inventory_version,),
         )

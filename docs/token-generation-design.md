@@ -1646,6 +1646,9 @@ Recommended semantics:
 - only store pairs with `shared_occurrence_count > 0`
 - `extension_side = 'left'` when the larger candidate begins one token earlier
 - `extension_side = 'right'` when the larger candidate ends one token later
+- `extension_side = 'both'` when the same smaller/larger pair is attested from
+  both sides across occurrences, which can happen with repeated-token parents
+  such as `de -> de de`
 - under the current `1`/`2`/`3`-gram pipeline, Step 5 pair rows can only point
   from `1`-grams to `2`-grams or from `2`-grams to `3`-grams
 - do not add Step 5 coverage columns to `token_candidates` yet
@@ -1722,9 +1725,13 @@ Reason:
 Validation:
 
 - every Step 5 pair row has `larger.ngram_size = smaller.ngram_size + 1`
-- `shared_occurrence_count` is less than or equal to both candidate
-  `raw_frequency` values
+- `shared_occurrence_count` is less than or equal to the smaller candidate
+  `raw_frequency`
+- `shared_occurrence_count > larger.raw_frequency` is allowed only for
+  repeated-token parents that collapse to `extension_side = 'both'`
 - `extension_side` matches token-offset evidence
+- repeated-token direct parents collapse to one pair row with
+  `extension_side = 'both'`
 - repeated refresh is deterministic
 
 Sanity checks:
@@ -1788,6 +1795,8 @@ Recommended summary semantics:
   - higher parent `raw_frequency`
   - then lexical `candidate_key`
 - `dominant_parent_share = dominant_parent_shared_count / raw_frequency`
+- `dominant_parent_side` mirrors the stored pair side and may be `left`,
+  `right`, or `both`
 - Step 5 summaries are meaningful only for candidates that can have a direct
   parent under the current `max_n`
 
@@ -1846,8 +1855,10 @@ DB validation:
 
 - Step 4 mismatch counts remain zero
 - `candidate_containment` rows only connect `1 -> 2` and `2 -> 3`
-- `shared_occurrence_count` never exceeds the smaller or larger candidate
+- `shared_occurrence_count` never exceeds the smaller candidate
   `raw_frequency`
+- rows where `shared_occurrence_count > larger.raw_frequency` are limited to
+  repeated-token parents with `extension_side = 'both'`
 - candidate-level Step 5 summaries stay consistent with `raw_frequency`
 - repeated refresh remains deterministic
 - foreign-key integrity remains clean
@@ -1860,6 +1871,8 @@ Sanity checks:
   when they are covered by many direct parents
 - `envie` shows meaningful containment structure without collapsing into one
   obvious dominant parent
+- repeated-token pairs such as `de -> de de` collapse to one factual pair row
+  with `extension_side = 'both'`
 - top `3`-gram inspection does not invent fake Step 5 covered-by-parent values
 - repeated refreshes leave pair counts and candidate-level Step 5 summaries
   unchanged
@@ -1929,19 +1942,27 @@ Step 4A through 4E are implemented through unithood metric schema, deterministic
 association and boundary refresh, candidate inspection commands, and pilot-scale
 validation.
 
-Step 5 should now be implemented as explicit substeps `5A` through `5D`.
+Step 5A through 5D are implemented through containment schema, deterministic
+refresh, candidate-level inspection, and pilot validation.
 
-Current completed target:
+Previous completed target:
 
 ```text
 stable candidate facts -> stored unithood metrics for multiword candidates
 ```
 
-Next implementation target:
+Current completed target:
 
 ```text
 stored unithood metrics -> stored direct-parent containment facts and
 inspectable dominance summaries
+```
+
+Next implementation target:
+
+```text
+inspectable dominance summaries -> first ranking with explicit redundancy
+penalty
 ```
 
 Reason:
@@ -1950,9 +1971,11 @@ Reason:
   association, and boundary metrics
 - pilot validation shows Step 4 metrics are populated, deterministic, and
   visible in the existing inspection workflow
-- Step 5 can now compare smaller candidates against specific direct parents
-  using a stable unithood base instead of raw frequency alone
-- splitting Step 5 into schema, refresh, inspection, and pilot validation keeps
+- Step 5 containment facts are now populated, deterministic, and inspectable in
+  the existing metrics workflow
+- pilot validation exposed and fixed the repeated-token both-side parent case,
+  keeping one factual pair row per smaller/larger candidate pair
+- splitting Step 5 into schema, refresh, inspection, and pilot validation kept
   pairwise containment facts separate from Step 6 score weighting
 
-Next step: Step 5D, Pilot Validation.
+Next step: Step 6, Candidate Ranking V1.

@@ -274,7 +274,7 @@ CREATE TABLE IF NOT EXISTS candidate_containment (
     inventory_version TEXT NOT NULL,
     smaller_candidate_id INTEGER NOT NULL,
     larger_candidate_id INTEGER NOT NULL,
-    extension_side TEXT NOT NULL CHECK (extension_side IN ('left', 'right')),
+    extension_side TEXT NOT NULL CHECK (extension_side IN ('left', 'right', 'both')),
     shared_occurrence_count INTEGER NOT NULL CHECK (shared_occurrence_count > 0),
     shared_episode_count INTEGER NOT NULL
         CHECK (

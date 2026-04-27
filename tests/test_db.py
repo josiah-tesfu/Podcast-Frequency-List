@@ -361,6 +361,14 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
                 "PRAGMA table_info(candidate_containment)"
             ).fetchall()
         }
+        containment_table_sql = connection.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table'
+            AND name = 'candidate_containment'
+            """
+        ).fetchone()["sql"]
         tables = {
             row["name"]
             for row in connection.execute(
@@ -424,6 +432,7 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert containment_columns["extension_side"]["notnull"] == 1
     assert containment_columns["shared_occurrence_count"]["notnull"] == 1
     assert containment_columns["shared_episode_count"]["notnull"] == 1
+    assert "'both'" in containment_table_sql
     assert {
         "idx_token_candidates_inventory_version",
         "idx_token_candidates_ngram_size",
@@ -652,6 +661,14 @@ def test_bootstrap_creates_candidate_containment_table_from_v11_schema(tmp_path)
                 "PRAGMA table_info(candidate_containment)"
             ).fetchall()
         }
+        containment_table_sql = connection.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table'
+            AND name = 'candidate_containment'
+            """
+        ).fetchone()["sql"]
         row = connection.execute(
             """
             SELECT
@@ -678,11 +695,138 @@ def test_bootstrap_creates_candidate_containment_table_from_v11_schema(tmp_path)
         "shared_occurrence_count",
         "shared_episode_count",
     } <= containment_columns
+    assert "'both'" in containment_table_sql
     assert row["raw_frequency"] == 7
     assert row["episode_dispersion"] == 3
     assert row["show_dispersion"] == 2
     assert row["t_score"] == 1.5
     assert row["npmi"] == 0.4
+    assert schema_version == SCHEMA_VERSION
+    assert foreign_key_issues == []
+
+
+def test_bootstrap_migrates_candidate_containment_side_from_v12_schema(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+                show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+                t_score REAL,
+                npmi REAL,
+                left_context_type_count INTEGER
+                    CHECK (left_context_type_count IS NULL OR left_context_type_count >= 0),
+                right_context_type_count INTEGER
+                    CHECK (right_context_type_count IS NULL OR right_context_type_count >= 0),
+                left_entropy REAL
+                    CHECK (left_entropy IS NULL OR left_entropy >= 0),
+                right_entropy REAL
+                    CHECK (right_entropy IS NULL OR right_entropy >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE candidate_containment (
+                inventory_version TEXT NOT NULL,
+                smaller_candidate_id INTEGER NOT NULL,
+                larger_candidate_id INTEGER NOT NULL,
+                extension_side TEXT NOT NULL CHECK (extension_side IN ('left', 'right')),
+                shared_occurrence_count INTEGER NOT NULL CHECK (shared_occurrence_count > 0),
+                shared_episode_count INTEGER NOT NULL
+                    CHECK (
+                        shared_episode_count > 0
+                        AND shared_episode_count <= shared_occurrence_count
+                    ),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (inventory_version, smaller_candidate_id, larger_candidate_id),
+                CHECK (smaller_candidate_id <> larger_candidate_id),
+                FOREIGN KEY (smaller_candidate_id, inventory_version)
+                    REFERENCES token_candidates(candidate_id, inventory_version)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (larger_candidate_id, inventory_version)
+                    REFERENCES token_candidates(candidate_id, inventory_version)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_candidate_containment_larger
+                ON candidate_containment (inventory_version, larger_candidate_id)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                candidate_id,
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency
+            )
+            VALUES
+                (1, '1', 'de', 'de', 1, 2),
+                (2, '1', 'de de', 'de de', 2, 1)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_containment (
+                inventory_version,
+                smaller_candidate_id,
+                larger_candidate_id,
+                extension_side,
+                shared_occurrence_count,
+                shared_episode_count
+            )
+            VALUES ('1', 1, 2, 'left', 2, 1)
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        containment_table_sql = connection.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table'
+            AND name = 'candidate_containment'
+            """
+        ).fetchone()["sql"]
+        row = connection.execute(
+            """
+            SELECT extension_side, shared_occurrence_count, shared_episode_count
+            FROM candidate_containment
+            WHERE inventory_version = '1'
+            AND smaller_candidate_id = 1
+            AND larger_candidate_id = 2
+            """
+        ).fetchone()
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert "'both'" in containment_table_sql
+    assert row["extension_side"] == "left"
+    assert row["shared_occurrence_count"] == 2
+    assert row["shared_episode_count"] == 1
     assert schema_version == SCHEMA_VERSION
     assert foreign_key_issues == []
 
@@ -834,6 +978,12 @@ def test_candidate_containment_enforces_uniqueness_and_foreign_keys(tmp_path) ->
             display_text="ai envie",
             ngram_size=2,
         )
+        both_side_candidate_id = _insert_candidate(
+            connection,
+            candidate_key="envie envie",
+            display_text="envie envie",
+            ngram_size=2,
+        )
         connection.execute(
             """
             INSERT INTO candidate_containment (
@@ -896,3 +1046,18 @@ def test_candidate_containment_enforces_uniqueness_and_foreign_keys(tmp_path) ->
                 """,
                 ("2", smaller_candidate_id, larger_candidate_id, "left", 1, 1),
             )
+
+        connection.execute(
+            """
+            INSERT INTO candidate_containment (
+                inventory_version,
+                smaller_candidate_id,
+                larger_candidate_id,
+                extension_side,
+                shared_occurrence_count,
+                shared_episode_count
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("1", smaller_candidate_id, both_side_candidate_id, "both", 1, 1),
+        )

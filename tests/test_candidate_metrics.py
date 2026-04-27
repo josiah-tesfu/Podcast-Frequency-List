@@ -1660,6 +1660,68 @@ def test_candidate_metrics_service_containment_refresh_is_idempotent(tmp_path) -
     assert second_rows == first_rows
 
 
+def test_candidate_metrics_service_containment_refresh_aggregates_both_sides(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = upsert_show(
+            connection,
+            title="Main Show",
+            feed_url="https://example.com/main.xml",
+        )
+        de_id = _insert_candidate(
+            connection,
+            candidate_key="de",
+            display_text="de",
+            ngram_size=1,
+        )
+        de_de_id = _insert_candidate(
+            connection,
+            candidate_key="de de",
+            display_text="de de",
+            ngram_size=2,
+        )
+        _insert_occurrence_bundle(
+            connection,
+            show_id=show_id,
+            guid="ep-1",
+            sentence_text="de de",
+            occurrences=(
+                (de_id, 0, 1, 0, 2, "de"),
+                (de_id, 1, 2, 3, 5, "de"),
+                (de_de_id, 0, 2, 0, 5, "de de"),
+            ),
+        )
+        connection.commit()
+
+    service = CandidateMetricsService(db_path=db_path)
+    service.refresh()
+
+    with connect(db_path) as connection:
+        rows = _load_containment_rows(connection)
+
+    summary = service.list_candidates_by_key(candidate_keys=("de",))[0]
+
+    assert rows == (
+        {
+            "smaller_key": "de",
+            "larger_key": "de de",
+            "extension_side": "both",
+            "shared_occurrence_count": 2,
+            "shared_episode_count": 1,
+        },
+    )
+    assert summary.covered_by_any_count == 2
+    assert summary.covered_by_any_ratio == pytest.approx(1.0)
+    assert summary.independent_occurrence_count == 0
+    assert summary.direct_parent_count == 1
+    assert summary.dominant_parent_key == "de de"
+    assert summary.dominant_parent_shared_count == 2
+    assert summary.dominant_parent_share == pytest.approx(1.0)
+    assert summary.dominant_parent_side == "both"
+
+
 def test_candidate_metrics_service_errors_without_candidates(tmp_path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)

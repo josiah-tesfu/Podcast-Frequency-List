@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "12"
+SCHEMA_VERSION = "13"
 
 
 def get_schema_path() -> Path:
@@ -37,6 +37,7 @@ def bootstrap_database(db_path: Path | None = None) -> Path:
         migrate_legacy_schema(connection)
         connection.executescript(load_schema())
         migrate_token_candidate_schema(connection)
+        migrate_candidate_containment_schema(connection)
         connection.execute(
             """
             INSERT INTO app_meta (key, value)
@@ -185,6 +186,81 @@ def migrate_token_candidate_schema(connection: sqlite3.Connection) -> None:
     for column_name, migration_sql in _TOKEN_CANDIDATE_MIGRATIONS:
         if column_name not in columns:
             connection.execute(migration_sql)
+
+
+def migrate_candidate_containment_schema(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table'
+        AND name = 'candidate_containment'
+        """
+    ).fetchone()
+    if row is None:
+        return
+
+    table_sql = row["sql"] or ""
+    if "'both'" in table_sql:
+        return
+
+    connection.execute("ALTER TABLE candidate_containment RENAME TO candidate_containment_old")
+    connection.execute(
+        """
+        CREATE TABLE candidate_containment (
+            inventory_version TEXT NOT NULL,
+            smaller_candidate_id INTEGER NOT NULL,
+            larger_candidate_id INTEGER NOT NULL,
+            extension_side TEXT NOT NULL
+                CHECK (extension_side IN ('left', 'right', 'both')),
+            shared_occurrence_count INTEGER NOT NULL
+                CHECK (shared_occurrence_count > 0),
+            shared_episode_count INTEGER NOT NULL
+                CHECK (
+                    shared_episode_count > 0
+                    AND shared_episode_count <= shared_occurrence_count
+                ),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (inventory_version, smaller_candidate_id, larger_candidate_id),
+            CHECK (smaller_candidate_id <> larger_candidate_id),
+            FOREIGN KEY (smaller_candidate_id, inventory_version)
+                REFERENCES token_candidates(candidate_id, inventory_version)
+                ON DELETE CASCADE,
+            FOREIGN KEY (larger_candidate_id, inventory_version)
+                REFERENCES token_candidates(candidate_id, inventory_version)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO candidate_containment (
+            inventory_version,
+            smaller_candidate_id,
+            larger_candidate_id,
+            extension_side,
+            shared_occurrence_count,
+            shared_episode_count,
+            created_at
+        )
+        SELECT
+            inventory_version,
+            smaller_candidate_id,
+            larger_candidate_id,
+            extension_side,
+            shared_occurrence_count,
+            shared_episode_count,
+            created_at
+        FROM candidate_containment_old
+        """
+    )
+    connection.execute("DROP TABLE candidate_containment_old")
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_candidate_containment_larger
+            ON candidate_containment (inventory_version, larger_candidate_id)
+        """
+    )
 
 
 def upsert_show(
