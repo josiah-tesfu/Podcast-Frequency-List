@@ -11,11 +11,13 @@ from podcast_frequency_list.tokens.models import (
     CandidateInventoryResult,
     CandidateMetricsResult,
     CandidateMetricsValidationResult,
+    CandidateScoresResult,
     CandidateSpan,
     CandidateSummaryRow,
     SentenceToken,
     TokenizationResult,
 )
+from podcast_frequency_list.tokens.scores import CandidateScoresError, CandidateScoresService
 from podcast_frequency_list.tokens.service import (
     TOKENIZATION_VERSION,
     SentenceTokenizationError,
@@ -37,6 +39,9 @@ __all__ = [
     "CandidateMetricsResult",
     "CandidateMetricsService",
     "CandidateMetricsValidationResult",
+    "CandidateScoresError",
+    "CandidateScoresResult",
+    "CandidateScoresService",
     "CandidateSummaryRow",
     "CandidateSpan",
     "INVENTORY_VERSION",

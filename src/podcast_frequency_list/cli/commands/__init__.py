@@ -7,6 +7,9 @@ import typer
 from podcast_frequency_list.cli.commands.candidate_metrics import (
     COMMANDS as CANDIDATE_METRICS_COMMANDS,
 )
+from podcast_frequency_list.cli.commands.candidate_scores import (
+    COMMANDS as CANDIDATE_SCORES_COMMANDS,
+)
 from podcast_frequency_list.cli.commands.catalog import COMMANDS as CATALOG_COMMANDS
 from podcast_frequency_list.cli.commands.execution import CommandCallback, set_registry
 from podcast_frequency_list.cli.commands.processing import (
@@ -23,6 +26,7 @@ _COMMANDS: tuple[tuple[str, CommandCallback], ...] = (
     *TRANSCRIPTION_COMMANDS,
     *PROCESSING_COMMANDS,
     *CANDIDATE_METRICS_COMMANDS,
+    *CANDIDATE_SCORES_COMMANDS,
 )
 
 

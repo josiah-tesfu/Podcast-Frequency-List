@@ -18,6 +18,7 @@ from podcast_frequency_list.sentences import SentenceSplitService
 from podcast_frequency_list.tokens import (
     CandidateInventoryService,
     CandidateMetricsService,
+    CandidateScoresService,
     SentenceTokenizationService,
 )
 
@@ -89,3 +90,8 @@ def build_candidate_inventory_service() -> CandidateInventoryService:
 def build_candidate_metrics_service() -> CandidateMetricsService:
     settings = load_settings()
     return CandidateMetricsService(db_path=settings.db_path)
+
+
+def build_candidate_scores_service() -> CandidateScoresService:
+    settings = load_settings()
+    return CandidateScoresService(db_path=settings.db_path)

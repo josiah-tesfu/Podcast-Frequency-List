@@ -79,6 +79,18 @@ class CandidateMetricsValidationResult:
 
 
 @dataclass(frozen=True)
+class CandidateScoresResult:
+    inventory_version: str
+    score_version: str
+    selected_candidates: int
+    stored_candidates: int
+    eligible_candidates: int
+    eligible_1gram_candidates: int
+    eligible_2gram_candidates: int
+    eligible_3gram_candidates: int
+
+
+@dataclass(frozen=True)
 class CandidateSummaryRow:
     candidate_key: str
     display_text: str

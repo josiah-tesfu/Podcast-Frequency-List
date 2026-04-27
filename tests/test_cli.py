@@ -16,6 +16,7 @@ from podcast_frequency_list.tokens.models import (
     CandidateInventoryResult,
     CandidateMetricsResult,
     CandidateMetricsValidationResult,
+    CandidateScoresResult,
     CandidateSummaryRow,
     TokenizationResult,
 )
@@ -411,6 +412,24 @@ class FakeCandidateMetricsService:
 
     def close(self) -> None:
         return None
+
+
+class FakeCandidateScoresService:
+    def __init__(self) -> None:
+        self.refresh_calls = 0
+
+    def refresh(self) -> CandidateScoresResult:
+        self.refresh_calls += 1
+        return CandidateScoresResult(
+            inventory_version="1",
+            score_version="pilot-v1",
+            selected_candidates=49_542,
+            stored_candidates=49_542,
+            eligible_candidates=804,
+            eligible_1gram_candidates=205,
+            eligible_2gram_candidates=453,
+            eligible_3gram_candidates=146,
+        )
 
 
 def test_cli_help() -> None:
@@ -876,6 +895,36 @@ def test_refresh_candidate_metrics_prints_stats(tmp_path, monkeypatch) -> None:
         "episode_dispersion_total=40",
         "show_dispersion_total=22",
         "display_text_updates=5",
+    ]
+    assert fake_service.refresh_calls == 1
+
+    load_settings.cache_clear()
+
+
+def test_refresh_candidate_scores_prints_stats(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateScoresService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_scores_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(app, ["refresh-candidate-scores"])
+
+    assert result.exit_code == 0
+    assert result.stdout.splitlines() == [
+        "inventory_version=1",
+        "score_version=pilot-v1",
+        "selected_candidates=49542",
+        "stored_candidates=49542",
+        "eligible_candidates=804",
+        "eligible_1gram_candidates=205",
+        "eligible_2gram_candidates=453",
+        "eligible_3gram_candidates=146",
     ]
     assert fake_service.refresh_calls == 1
 

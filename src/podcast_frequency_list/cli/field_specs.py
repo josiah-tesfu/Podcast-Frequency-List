@@ -106,6 +106,16 @@ CANDIDATE_METRICS_RESULT_FIELDS: tuple[FieldSpec, ...] = (
     ("show_dispersion_total", "show_dispersion_total"),
     ("display_text_updates", "display_text_updates"),
 )
+CANDIDATE_SCORES_RESULT_FIELDS: tuple[FieldSpec, ...] = (
+    ("inventory_version", "inventory_version"),
+    ("score_version", "score_version"),
+    ("selected_candidates", "selected_candidates"),
+    ("stored_candidates", "stored_candidates"),
+    ("eligible_candidates", "eligible_candidates"),
+    ("eligible_1gram_candidates", "eligible_1gram_candidates"),
+    ("eligible_2gram_candidates", "eligible_2gram_candidates"),
+    ("eligible_3gram_candidates", "eligible_3gram_candidates"),
+)
 CANDIDATE_METRICS_VALIDATION_FIELDS: tuple[FieldSpec, ...] = (
     ("inventory_version", "inventory_version"),
     ("candidate_count", "candidate_count"),

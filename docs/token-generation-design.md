@@ -2416,4 +2416,4 @@ Reason:
 - splitting Step 6 into schema, gates, scoring, deck composition, and pilot
   validation keeps ranking policy explicit and reviewable
 
-Next step: Step 6B, Eligibility Gates And Lane Assignment.
+Next step: Step 6C, Lane-Specific Components And Final Score.

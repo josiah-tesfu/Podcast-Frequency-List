@@ -6,6 +6,7 @@ from podcast_frequency_list.cli.field_specs import (
     CANDIDATE_INVENTORY_RESULT_FIELDS,
     CANDIDATE_METRICS_RESULT_FIELDS,
     CANDIDATE_METRICS_VALIDATION_FIELDS,
+    CANDIDATE_SCORES_RESULT_FIELDS,
     NORMALIZATION_RESULT_FIELDS,
     PILOT_RESULT_FIELDS,
     QC_RESULT_FIELDS,
@@ -27,6 +28,7 @@ from podcast_frequency_list.tokens import (
     CandidateInventoryResult,
     CandidateMetricsResult,
     CandidateMetricsValidationResult,
+    CandidateScoresResult,
     CandidateSummaryRow,
     TokenizationResult,
 )
@@ -89,6 +91,10 @@ def emit_candidate_inventory_result(result: CandidateInventoryResult) -> None:
 
 def emit_candidate_metrics_result(result: CandidateMetricsResult) -> None:
     _emit_result_fields(result, CANDIDATE_METRICS_RESULT_FIELDS)
+
+
+def emit_candidate_scores_result(result: CandidateScoresResult) -> None:
+    _emit_result_fields(result, CANDIDATE_SCORES_RESULT_FIELDS)
 
 
 def emit_candidate_metrics_validation(result: CandidateMetricsValidationResult) -> None:
