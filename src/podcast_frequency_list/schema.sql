@@ -294,3 +294,33 @@ CREATE TABLE IF NOT EXISTS candidate_containment (
 
 CREATE INDEX IF NOT EXISTS idx_candidate_containment_larger
     ON candidate_containment (inventory_version, larger_candidate_id);
+
+CREATE TABLE IF NOT EXISTS candidate_scores (
+    inventory_version TEXT NOT NULL,
+    score_version TEXT NOT NULL,
+    candidate_id INTEGER NOT NULL,
+    ranking_lane TEXT NOT NULL CHECK (ranking_lane IN ('1gram', '2gram', '3gram')),
+    is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),
+    frequency_score REAL,
+    dispersion_score REAL,
+    association_score REAL,
+    boundary_score REAL,
+    redundancy_penalty REAL,
+    final_score REAL,
+    lane_rank INTEGER CHECK (lane_rank IS NULL OR lane_rank > 0),
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (inventory_version, score_version, candidate_id),
+    CHECK (is_eligible = 1 OR lane_rank IS NULL),
+    CHECK (is_eligible = 1 OR final_score IS NULL),
+    FOREIGN KEY (candidate_id, inventory_version)
+        REFERENCES token_candidates(candidate_id, inventory_version)
+        ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_candidate_scores_lane_rank
+    ON candidate_scores (
+        inventory_version,
+        score_version,
+        ranking_lane,
+        lane_rank
+    );

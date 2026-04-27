@@ -1893,18 +1893,454 @@ Exit criteria:
 
 ### Step 6: Candidate Ranking V1
 
-Combine metrics into a first ranking.
+Combine stored candidate facts into a first ranked review/deck surface.
 
 Deliverables:
 
 - `candidate_scores` table
-- score versioning
-- length-specific thresholds
-- top candidate report
+- score versioning and lane semantics
+- support gates that cut the sparse tail before scoring
+- lane-specific score formulas for `1`/`2`/`3`-gram candidates
+- conservative redundancy penalty from Step 5
+- lane-aware top candidate report and deck cap surface
 
 Output:
 
-- ranked candidate list for review
+- ranked review list that includes function words, glue phrases, and stronger
+  chunks without letting any one class flood the pilot deck
+
+Step 6 should not be implemented as one broad pass.
+
+This is the most policy-heavy stage in the pipeline. The stored metrics are
+deterministic, but ranking still has to decide how to handle sparse tails, how
+much raw frequency should matter after `t_score`, how to keep useful
+function-word and glue material visible, and how Step 5 should affect ranking
+without crushing productive candidates. Splitting keeps the score contract
+inspectable and prevents deck-composition policy from being hidden inside one
+large refresh.
+
+Recommended Step 6 stance:
+
+- keep `1`/`2`/`3`-gram candidates in scope; do not hard blacklist glue phrases
+  or function words in v1
+- store scores in one `candidate_scores` table, but compute separate ranking
+  lanes for `1gram`, `2gram`, and `3gram`
+- gate candidates before normalization and scoring
+- store both eligible and ineligible candidates so support-gate behavior stays
+  inspectable
+- cut the sparse tail with absolute support floors in the pilot
+- compute normalization only inside the eligible lane, never over the full raw
+  inventory
+- ignore `show_dispersion` in the current pilot because it is constant
+- treat support as necessary but secondary after gating
+- let association carry most of the multiword ranking signal, with boundary as
+  a secondary signal
+- use Step 5 only as a conservative direct-parent penalty; never use
+  `covered_by_any` as a general penalty
+- keep `1`-gram redundancy impact off or very mild in v1
+- compose the final review/deck surface with lane caps rather than one flat
+  global pool
+- keep score components and lane ranks inspectable and versioned
+- defer proper-noun penalties, blacklist hooks, and semantic filters to later
+  review/tuning work
+
+Deterministic parts:
+
+- lane assignment
+- eligibility filtering from stored metrics
+- within-lane normalization
+- component score computation
+- final score computation once weights are selected
+- lane rank computation
+- deck/report generation from stored scores
+- repeated reruns
+
+Policy-driven but deterministic after selection:
+
+- exact support floors
+- whether to score all candidates or also store ineligible rows
+- exact component weights
+- whether the `1gram` lane gets any Step 5 penalty in v1
+- deck cap formula and lane shares
+- whether pilot caps are absolute only or also scale with total occurrences
+
+Out of scope for Step 6:
+
+- example selection
+- blacklist hooks
+- proper-noun or named-entity classifiers
+- manual keep/reject annotations
+- semantic clustering
+- final export format
+- cross-corpus tuning
+
+#### Step 6A: Ranking Contract And Schema
+
+Define score storage and versioning before implementing policy math.
+
+Scope:
+
+- add a new `candidate_scores` table
+- define score versioning and lane semantics
+- support DB migration
+- add only the indexes needed for refresh and inspection
+- no scoring math yet
+- no ranking CLI change yet
+
+Recommended stored fields:
+
+- `candidate_id INTEGER NOT NULL`
+- `inventory_version TEXT NOT NULL`
+- `score_version TEXT NOT NULL`
+- `ranking_lane TEXT NOT NULL`
+- `is_eligible INTEGER NOT NULL`
+- `frequency_score REAL`
+- `dispersion_score REAL`
+- `association_score REAL`
+- `boundary_score REAL`
+- `redundancy_penalty REAL`
+- `final_score REAL`
+- `lane_rank INTEGER`
+- `created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`
+
+Recommended semantics:
+
+- one row per `(inventory_version, score_version, candidate_id)`
+- `ranking_lane` is one of `1gram`, `2gram`, `3gram`
+- store all candidates for the current inventory version so ineligible rows
+  remain inspectable
+- ineligible rows keep `is_eligible = 0`, `lane_rank = NULL`, and
+  `final_score = NULL`
+- `frequency_score` and `dispersion_score` exist for all lanes
+- `association_score` and `boundary_score` are `NULL` for `1`-grams in v1
+- `redundancy_penalty` is `0` or very mild for `1`-grams in v1
+- `lane_rank` orders only eligible rows within `(score_version, ranking_lane)`
+
+Reason:
+
+- Step 6 needs versioned output because score policy will change
+- storing ineligible rows keeps support-gate decisions visible
+- lane-specific null semantics avoid fake comparability between `1`-grams and
+  multiword candidates
+
+Validation:
+
+- fresh DB contains `candidate_scores`
+- migration is green
+- uniqueness and foreign keys are enforced
+- Step 4 and Step 5 data remain unchanged
+
+Sanity checks:
+
+- `candidate_scores` can store `1`-gram, `2`-gram, and `3`-gram rows together
+- lane-specific null semantics are explicit
+- schema supports multiple score versions for the same candidate
+
+Tests:
+
+- fresh schema test
+- migration test from Step 5 schema
+- uniqueness and foreign-key test
+- lane/null semantics test
+
+Exit criteria:
+
+- score storage contract is explicit
+- migration is green
+- no ranking math included yet
+
+#### Step 6B: Eligibility Gates And Lane Assignment
+
+Cut the sparse tail before normalization or scoring.
+
+Scope:
+
+- assign ranking lanes from `ngram_size`
+- define pilot support floors
+- mark eligible vs ineligible candidates
+- keep support-gate behavior inspectable
+- no weighted scoring yet
+- no deck cap yet
+
+Recommended pilot lanes:
+
+- `1gram`: single-token candidates
+- `2gram`: two-token candidates
+- `3gram`: three-token candidates
+
+Recommended pilot support floors:
+
+- `1gram`: `raw_frequency >= 20` and `episode_dispersion >= 5`
+- `2gram`: `raw_frequency >= 10` and `episode_dispersion >= 3`
+- `3gram`: `raw_frequency >= 10` and `episode_dispersion >= 3`
+
+Recommended semantics:
+
+- support floors apply before any percentile or rank normalization
+- support floors are lane-specific but category-agnostic: no glue/function-word
+  blacklist
+- store all candidates, but set `is_eligible = 0` when a lane floor fails
+- ignore `show_dispersion` in pilot v1 because the current pilot has only one
+  show
+
+Reason:
+
+- the raw inventory tail is too sparse for stable whole-inventory scoring
+- pilot data showed that modest raw counts already land at extreme percentiles
+  if the tail is not cut first
+- per-lane floors preserve useful function words and glue phrases while
+  removing most singletons and doubletons
+
+Current pilot reference counts:
+
+- `1gram`: about `205` candidates at `freq >= 20`, `episode_dispersion >= 5`
+- `2gram`: about `453` candidates at `freq >= 10`, `episode_dispersion >= 3`
+- `3gram`: about `146` candidates at `freq >= 10`, `episode_dispersion >= 3`
+
+Validation:
+
+- eligible counts are deterministic for a fixed pilot snapshot
+- ineligible rows remain queryable
+- no score normalization is performed on ineligible tails
+
+Sanity checks:
+
+- common function words remain eligible in the `1gram` lane
+- frequent glue phrases remain eligible in the `2gram` and `3gram` lanes
+- low-support long-tail singletons/doubletons are filtered before scoring
+- gates reduce the pilot review pool to a manageable scale without hand-written
+  category rules
+
+Tests:
+
+- lane assignment test
+- eligibility flag test
+- deterministic count test on a fixture corpus
+- ineligible rows keep null final scores
+
+Exit criteria:
+
+- support-gated candidate pool is explicit
+- sparse-tail distortion is removed before score normalization
+
+#### Step 6C: Lane-Specific Components And Final Score
+
+Compute inspectable component scores inside the eligible pool.
+
+Scope:
+
+- compute normalized support, association, and boundary components
+- compute conservative Step 5 penalty
+- produce final lane-specific scores
+- keep formulas inspectable and linear
+- no deck cap/report composition yet
+
+Recommended component semantics:
+
+- `frequency_score`: normalized `log1p(raw_frequency)` within the eligible lane
+- `dispersion_score`: normalized `episode_dispersion` within the eligible lane
+- `association_score`:
+  - `2`/`3`-gram only
+  - blend `npmi` and `t_score`
+  - weight `npmi` more heavily than `t_score` because `t_score` already tracks
+    frequency strongly in the pilot
+- `boundary_score`:
+  - `2`/`3`-gram only
+  - normalize weaker-side entropy: `min(left_entropy, right_entropy)`
+- `redundancy_penalty`:
+  - `2`-gram only in pilot v1
+  - based on `dominant_parent_share`
+  - zero below a high threshold such as `0.80`
+  - ramps upward above that threshold
+  - never uses `covered_by_any_ratio`
+- `1`-gram lane:
+  - support-only in v1
+  - `association_score` and `boundary_score` remain `NULL`
+  - `redundancy_penalty` stays `0` in v1
+
+Recommended pilot formulas:
+
+- `1gram final_score = 0.65 * frequency_score + 0.35 * dispersion_score`
+- `2gram support_score = 0.60 * frequency_score + 0.40 * dispersion_score`
+- `2gram association_score = 0.65 * npmi_norm + 0.35 * t_score_norm`
+- `2gram final_score = 0.20 * support_score + 0.50 * association_score + 0.20 * boundary_score - 0.10 * redundancy_penalty`
+- `3gram support_score = 0.55 * frequency_score + 0.45 * dispersion_score`
+- `3gram association_score = 0.65 * npmi_norm + 0.35 * t_score_norm`
+- `3gram final_score = 0.20 * support_score + 0.55 * association_score + 0.25 * boundary_score`
+
+Reason:
+
+- pilot data showed that raw frequency and `t_score` are strongly correlated, so
+  support should not dominate again after gating
+- pilot data also showed that `npmi` is the clearest signal separating cohesive
+  spoken units from weak high-frequency fragments
+- boundary entropy helps once low-support tails are removed, but it is not
+  strong enough to stand alone
+- Step 5 is useful as a guardrail against obvious direct-parent fragments, but
+  only when applied conservatively
+
+Validation:
+
+- repeated scoring is deterministic
+- in-lane normalization does not look outside the eligible pool
+- `1gram` lane keeps `association_score` and `boundary_score` null
+- `3gram` lane keeps `redundancy_penalty = 0`
+- score-version reruns replace previous rows cleanly
+
+Sanity checks:
+
+- `du coup`, `en fait`, `je pense`, `il y a`, `je me dis`, and `j ai envie`
+  land near the top of their lanes
+- obvious direct-parent fragments such as `pense que`, `me dis`, `en tout`,
+  and `tout cas` lose rank in the `2gram` lane
+- useful glue/function-word material can still rank if it has enough support
+- weak fragments such as `et le`, `est que`, `c est que`, and `c est pas` do
+  not rise simply from frequency
+
+Tests:
+
+- support normalization test
+- association blend test
+- weakest-side boundary test
+- high-share redundancy penalty test
+- no-use-of-covered-by-any penalty test
+- `1gram` / `2gram` / `3gram` null-semantics test
+- deterministic rerun test
+
+Exit criteria:
+
+- final scores are stored, inspectable, and versioned
+- the first ranking remains linear and auditable
+
+#### Step 6D: Lane Caps, Review Surface, And Deck Composition
+
+Turn lane scores into a practical pilot review/deck surface.
+
+Scope:
+
+- compute lane ranks
+- expose top ranked candidates by lane
+- define pilot deck caps
+- keep deck composition explicit
+- no example selection yet
+- no blacklist hooks yet
+
+Recommended pilot composition stance:
+
+- do not flatten all lanes into one unconstrained pool
+- keep separate lane ranks for `1gram`, `2gram`, and `3gram`
+- compose pilot review/deck output from lane caps or lane shares
+- keep caps configurable and tied to support volume rather than manual
+  category rejection
+
+Recommended pilot cap surface:
+
+- `word_cap`
+- `bigram_cap`
+- `trigram_cap`
+- optional `total_cap`
+
+Recommended pilot defaults:
+
+- start with a review-first surface, not a final deck export
+- if a total cap is needed, derive it from total occurrence volume and then
+  split it by lane shares
+- keep lane shares configurable so useful function words and glue phrases
+  remain visible without crowding out multiword chunks
+
+Recommended pilot review order:
+
+- within-lane `final_score DESC`, then `raw_frequency DESC`, then
+  `candidate_key`
+- optional combined review view interleaves lanes only after lane caps are
+  applied
+
+Reason:
+
+- project goals now include useful function words and glue phrases, so Step 6
+  should balance lanes rather than suppress them globally
+- pilot data showed that each lane has different sparsity and different useful
+  signals
+- explicit lane caps make deck composition visible and tunable instead of
+  burying it inside one global score
+
+Validation:
+
+- lane ranks are deterministic
+- capped review surfaces are deterministic
+- changing a cap changes only deck composition, not stored component scores
+
+Sanity checks:
+
+- `1gram` lane still contains function words and common lexical words
+- `2gram` lane contains both glue-like scaffolding and stronger chunks, ordered
+  by score rather than by category
+- `3gram` lane contains cohesive spoken frames without flooding on low-support
+  tails
+- no candidate disappears because of hidden pruning outside the explicit
+  support gates and lane caps
+
+Tests:
+
+- lane rank test
+- per-lane top list query test
+- cap application test
+- no regression in existing inspection output
+
+Exit criteria:
+
+- pilot review/deck surface is explicit
+- deck composition can be tuned without changing score storage
+
+#### Step 6E: Pilot Validation
+
+Run the first ranking and inspect whether the resulting lanes and caps match
+the project goals.
+
+Required commands:
+
+```text
+uv run podfreq refresh-candidate-metrics
+uv run podfreq refresh-candidate-scores
+uv run podfreq inspect-candidate-scores --limit 20
+uv run ruff check src tests
+uv run pytest
+```
+
+DB validation:
+
+- `candidate_scores` rows exist for all current candidates and the current
+  score version
+- eligibility flags match lane support floors
+- `1gram` rows have null association/boundary scores
+- `3gram` rows have zero redundancy penalty
+- repeated refresh is deterministic
+- foreign-key integrity remains clean
+
+Sanity checks:
+
+- `du coup`, `en fait`, `il y a`, `je pense`, `je me dis`, and `j ai envie`
+  surface strongly in their lanes
+- `pense que`, `me dis`, `en tout`, and `tout cas` rank below their better
+  direct parents in the `2gram` lane
+- glue phrases and function words remain present when they clear the support
+  gate
+- `et le`, `est que`, `c est que`, `c est pas`, and similar weak fragments do
+  not dominate the top of the eligible lanes
+- `1gram` lane remains useful but does not erase the `2gram`/`3gram` surfaces
+  when caps are applied
+- changing lane caps changes composition, not the underlying scores
+
+Tests:
+
+- unit and integration tests from `6A` through `6D` remain green
+- pilot scoring does not require network
+- repeated pilot refresh is deterministic
+
+Exit criteria:
+
+- first ranking is stored, inspectable, and pilot-validated
+- Step 7 can choose examples from a stable, explicit ranked surface
 
 ### Step 7: Example Selection
 
@@ -1945,6 +2381,8 @@ validation.
 Step 5A through 5D are implemented through containment schema, deterministic
 refresh, candidate-level inspection, and pilot validation.
 
+Step 6 should now be implemented as explicit substeps `6A` through `6E`.
+
 Previous completed target:
 
 ```text
@@ -1968,14 +2406,14 @@ penalty
 Reason:
 
 - candidate facts are now refreshed into inspectable frequency, dispersion,
-  association, and boundary metrics
-- pilot validation shows Step 4 metrics are populated, deterministic, and
-  visible in the existing inspection workflow
-- Step 5 containment facts are now populated, deterministic, and inspectable in
-  the existing metrics workflow
-- pilot validation exposed and fixed the repeated-token both-side parent case,
-  keeping one factual pair row per smaller/larger candidate pair
-- splitting Step 5 into schema, refresh, inspection, and pilot validation kept
-  pairwise containment facts separate from Step 6 score weighting
+  association, boundary, and containment metrics
+- pilot analysis showed that whole-inventory ranking is too sparse and needs
+  support gates before normalization
+- pilot analysis also showed that `show_dispersion` is unusable in the current
+  one-show snapshot and that `covered_by_any` is too degenerate for ranking
+- useful function words and glue phrases should remain in scope, so Step 6 must
+  balance lanes and caps rather than applying blanket suppression
+- splitting Step 6 into schema, gates, scoring, deck composition, and pilot
+  validation keeps ranking policy explicit and reviewable
 
-Next step: Step 6, Candidate Ranking V1.
+Next step: Step 6B, Eligibility Gates And Lane Assignment.

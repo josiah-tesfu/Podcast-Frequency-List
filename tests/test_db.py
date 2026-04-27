@@ -361,12 +361,26 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
                 "PRAGMA table_info(candidate_containment)"
             ).fetchall()
         }
+        score_columns = {
+            row["name"]: row
+            for row in connection.execute(
+                "PRAGMA table_info(candidate_scores)"
+            ).fetchall()
+        }
         containment_table_sql = connection.execute(
             """
             SELECT sql
             FROM sqlite_master
             WHERE type = 'table'
             AND name = 'candidate_containment'
+            """
+        ).fetchone()["sql"]
+        score_table_sql = connection.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table'
+            AND name = 'candidate_scores'
             """
         ).fetchone()["sql"]
         tables = {
@@ -391,7 +405,12 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         }
         foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
 
-    assert {"token_candidates", "token_occurrences", "candidate_containment"} <= tables
+    assert {
+        "token_candidates",
+        "token_occurrences",
+        "candidate_containment",
+        "candidate_scores",
+    } <= tables
     assert {
         "episode_dispersion",
         "show_dispersion",
@@ -410,6 +429,20 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         "shared_occurrence_count",
         "shared_episode_count",
     } <= containment_columns.keys()
+    assert {
+        "inventory_version",
+        "score_version",
+        "candidate_id",
+        "ranking_lane",
+        "is_eligible",
+        "frequency_score",
+        "dispersion_score",
+        "association_score",
+        "boundary_score",
+        "redundancy_penalty",
+        "final_score",
+        "lane_rank",
+    } <= score_columns.keys()
     assert candidate_columns["episode_dispersion"]["notnull"] == 1
     assert candidate_columns["episode_dispersion"]["dflt_value"] == "0"
     assert candidate_columns["show_dispersion"]["notnull"] == 1
@@ -432,7 +465,26 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert containment_columns["extension_side"]["notnull"] == 1
     assert containment_columns["shared_occurrence_count"]["notnull"] == 1
     assert containment_columns["shared_episode_count"]["notnull"] == 1
+    assert score_columns["inventory_version"]["notnull"] == 1
+    assert score_columns["score_version"]["notnull"] == 1
+    assert score_columns["candidate_id"]["notnull"] == 1
+    assert score_columns["ranking_lane"]["notnull"] == 1
+    assert score_columns["is_eligible"]["notnull"] == 1
+    assert score_columns["created_at"]["notnull"] == 1
+    assert score_columns["created_at"]["dflt_value"] == "CURRENT_TIMESTAMP"
+    assert score_columns["frequency_score"]["notnull"] == 0
+    assert score_columns["dispersion_score"]["notnull"] == 0
+    assert score_columns["association_score"]["notnull"] == 0
+    assert score_columns["boundary_score"]["notnull"] == 0
+    assert score_columns["redundancy_penalty"]["notnull"] == 0
+    assert score_columns["final_score"]["notnull"] == 0
+    assert score_columns["lane_rank"]["notnull"] == 0
     assert "'both'" in containment_table_sql
+    assert "'1gram'" in score_table_sql
+    assert "'2gram'" in score_table_sql
+    assert "'3gram'" in score_table_sql
+    assert "is_eligible = 1 OR lane_rank IS NULL" in score_table_sql
+    assert "is_eligible = 1 OR final_score IS NULL" in score_table_sql
     assert {
         "idx_token_candidates_inventory_version",
         "idx_token_candidates_ngram_size",
@@ -442,6 +494,7 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         "idx_token_occurrences_episode",
         "idx_token_occurrences_scope",
         "idx_candidate_containment_larger",
+        "idx_candidate_scores_lane_rank",
     } <= indexes
     assert foreign_key_issues == []
 
@@ -831,6 +884,174 @@ def test_bootstrap_migrates_candidate_containment_side_from_v12_schema(tmp_path)
     assert foreign_key_issues == []
 
 
+def test_bootstrap_creates_candidate_scores_table_from_v13_schema(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+                show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+                t_score REAL,
+                npmi REAL,
+                left_context_type_count INTEGER
+                    CHECK (left_context_type_count IS NULL OR left_context_type_count >= 0),
+                right_context_type_count INTEGER
+                    CHECK (right_context_type_count IS NULL OR right_context_type_count >= 0),
+                left_entropy REAL
+                    CHECK (left_entropy IS NULL OR left_entropy >= 0),
+                right_entropy REAL
+                    CHECK (right_entropy IS NULL OR right_entropy >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE candidate_containment (
+                inventory_version TEXT NOT NULL,
+                smaller_candidate_id INTEGER NOT NULL,
+                larger_candidate_id INTEGER NOT NULL,
+                extension_side TEXT NOT NULL
+                    CHECK (extension_side IN ('left', 'right', 'both')),
+                shared_occurrence_count INTEGER NOT NULL
+                    CHECK (shared_occurrence_count > 0),
+                shared_episode_count INTEGER NOT NULL
+                    CHECK (
+                        shared_episode_count > 0
+                        AND shared_episode_count <= shared_occurrence_count
+                    ),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (inventory_version, smaller_candidate_id, larger_candidate_id),
+                CHECK (smaller_candidate_id <> larger_candidate_id),
+                FOREIGN KEY (smaller_candidate_id, inventory_version)
+                    REFERENCES token_candidates(candidate_id, inventory_version)
+                    ON DELETE CASCADE,
+                FOREIGN KEY (larger_candidate_id, inventory_version)
+                    REFERENCES token_candidates(candidate_id, inventory_version)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_candidate_containment_larger
+                ON candidate_containment (inventory_version, larger_candidate_id)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                candidate_id,
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                t_score,
+                npmi
+            )
+            VALUES
+                (1, '1', 'pense que', 'pense que', 2, 9, 4, 1, 3.5, 0.6),
+                (2, '1', 'je pense que', 'je pense que', 3, 9, 4, 1, 4.2, 0.7)
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_containment (
+                inventory_version,
+                smaller_candidate_id,
+                larger_candidate_id,
+                extension_side,
+                shared_occurrence_count,
+                shared_episode_count
+            )
+            VALUES ('1', 1, 2, 'left', 7, 4)
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        score_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(candidate_scores)").fetchall()
+        }
+        candidate_row = connection.execute(
+            """
+            SELECT
+                candidate_key,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                t_score,
+                npmi
+            FROM token_candidates
+            WHERE candidate_id = 1
+            """
+        ).fetchone()
+        containment_row = connection.execute(
+            """
+            SELECT
+                smaller_candidate_id,
+                larger_candidate_id,
+                extension_side,
+                shared_occurrence_count,
+                shared_episode_count
+            FROM candidate_containment
+            """
+        ).fetchone()
+        containment_count = connection.execute(
+            "SELECT COUNT(*) FROM candidate_containment"
+        ).fetchone()[0]
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert {
+        "inventory_version",
+        "score_version",
+        "candidate_id",
+        "ranking_lane",
+        "is_eligible",
+        "frequency_score",
+        "dispersion_score",
+        "association_score",
+        "boundary_score",
+        "redundancy_penalty",
+        "final_score",
+        "lane_rank",
+    } <= score_columns
+    assert candidate_row["candidate_key"] == "pense que"
+    assert candidate_row["raw_frequency"] == 9
+    assert candidate_row["episode_dispersion"] == 4
+    assert candidate_row["show_dispersion"] == 1
+    assert candidate_row["t_score"] == 3.5
+    assert candidate_row["npmi"] == 0.6
+    assert containment_row["smaller_candidate_id"] == 1
+    assert containment_row["larger_candidate_id"] == 2
+    assert containment_row["extension_side"] == "left"
+    assert containment_row["shared_occurrence_count"] == 7
+    assert containment_row["shared_episode_count"] == 4
+    assert containment_count == 1
+    assert schema_version == SCHEMA_VERSION
+    assert foreign_key_issues == []
+
+
 def test_step4_columns_default_to_null_for_one_gram_candidates(tmp_path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)
@@ -1061,3 +1282,258 @@ def test_candidate_containment_enforces_uniqueness_and_foreign_keys(tmp_path) ->
             """,
             ("1", smaller_candidate_id, both_side_candidate_id, "both", 1, 1),
         )
+
+
+def test_candidate_scores_enforce_uniqueness_and_foreign_keys(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        one_gram_id = _insert_candidate(
+            connection,
+            candidate_key="envie",
+            display_text="envie",
+            ngram_size=1,
+        )
+        two_gram_id = _insert_candidate(
+            connection,
+            candidate_key="j ai",
+            display_text="j'ai",
+            ngram_size=2,
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_scores (
+                inventory_version,
+                score_version,
+                candidate_id,
+                ranking_lane,
+                is_eligible,
+                frequency_score,
+                dispersion_score,
+                redundancy_penalty,
+                final_score,
+                lane_rank
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("1", "pilot-v1", one_gram_id, "1gram", 1, 0.8, 0.7, 0.0, 0.765, 1),
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO candidate_scores (
+                    inventory_version,
+                    score_version,
+                    candidate_id,
+                    ranking_lane,
+                    is_eligible
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("1", "pilot-v1", one_gram_id, "1gram", 0),
+            )
+
+        connection.execute(
+            """
+            INSERT INTO candidate_scores (
+                inventory_version,
+                score_version,
+                candidate_id,
+                ranking_lane,
+                is_eligible
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("1", "pilot-v2", one_gram_id, "1gram", 0),
+        )
+        score_row_count = connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM candidate_scores
+            WHERE inventory_version = '1'
+            AND candidate_id = ?
+            """,
+            (one_gram_id,),
+        ).fetchone()[0]
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO candidate_scores (
+                    inventory_version,
+                    score_version,
+                    candidate_id,
+                    ranking_lane,
+                    is_eligible
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("1", "pilot-v1", 999, "2gram", 0),
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO candidate_scores (
+                    inventory_version,
+                    score_version,
+                    candidate_id,
+                    ranking_lane,
+                    is_eligible
+                )
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("2", "pilot-v1", two_gram_id, "2gram", 0),
+            )
+
+    assert score_row_count == 2
+
+
+def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        one_gram_id = _insert_candidate(
+            connection,
+            candidate_key="de",
+            display_text="de",
+            ngram_size=1,
+        )
+        two_gram_id = _insert_candidate(
+            connection,
+            candidate_key="du coup",
+            display_text="du coup",
+            ngram_size=2,
+        )
+        three_gram_id = _insert_candidate(
+            connection,
+            candidate_key="il y a",
+            display_text="il y a",
+            ngram_size=3,
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_scores (
+                inventory_version,
+                score_version,
+                candidate_id,
+                ranking_lane,
+                is_eligible,
+                frequency_score,
+                dispersion_score,
+                association_score,
+                boundary_score,
+                redundancy_penalty,
+                final_score,
+                lane_rank
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("1", "pilot-v1", one_gram_id, "1gram", 1, 0.9, 0.8, None, None, 0.0, 0.865, 1),
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_scores (
+                inventory_version,
+                score_version,
+                candidate_id,
+                ranking_lane,
+                is_eligible,
+                frequency_score,
+                dispersion_score,
+                association_score,
+                boundary_score,
+                redundancy_penalty,
+                final_score,
+                lane_rank
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("1", "pilot-v1", two_gram_id, "2gram", 1, 0.7, 0.6, 0.9, 0.5, 0.1, 0.69, 2),
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_scores (
+                inventory_version,
+                score_version,
+                candidate_id,
+                ranking_lane,
+                is_eligible,
+                frequency_score,
+                dispersion_score,
+                association_score,
+                boundary_score,
+                redundancy_penalty,
+                final_score,
+                lane_rank
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("1", "pilot-v1", three_gram_id, "3gram", 0, 0.4, 0.5, 0.6, 0.4, 0.0, None, None),
+        )
+        rows = connection.execute(
+            """
+            SELECT
+                ranking_lane,
+                is_eligible,
+                association_score,
+                boundary_score,
+                redundancy_penalty,
+                final_score,
+                lane_rank
+            FROM candidate_scores
+            WHERE inventory_version = '1'
+            AND score_version = 'pilot-v1'
+            ORDER BY candidate_id
+            """
+        ).fetchall()
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO candidate_scores (
+                    inventory_version,
+                    score_version,
+                    candidate_id,
+                    ranking_lane,
+                    is_eligible,
+                    lane_rank
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("1", "pilot-v2", one_gram_id, "1gram", 0, 9),
+            )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO candidate_scores (
+                    inventory_version,
+                    score_version,
+                    candidate_id,
+                    ranking_lane,
+                    is_eligible,
+                    final_score
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                ("1", "pilot-v2", three_gram_id, "3gram", 0, 0.2),
+            )
+
+    assert [row["ranking_lane"] for row in rows] == ["1gram", "2gram", "3gram"]
+    assert rows[0]["association_score"] is None
+    assert rows[0]["boundary_score"] is None
+    assert rows[0]["redundancy_penalty"] == 0.0
+    assert rows[0]["final_score"] == pytest.approx(0.865)
+    assert rows[0]["lane_rank"] == 1
+    assert rows[1]["association_score"] == pytest.approx(0.9)
+    assert rows[1]["boundary_score"] == pytest.approx(0.5)
+    assert rows[1]["redundancy_penalty"] == pytest.approx(0.1)
+    assert rows[1]["final_score"] == pytest.approx(0.69)
+    assert rows[1]["lane_rank"] == 2
+    assert rows[2]["is_eligible"] == 0
+    assert rows[2]["final_score"] is None
+    assert rows[2]["lane_rank"] is None
