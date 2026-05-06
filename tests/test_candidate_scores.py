@@ -92,6 +92,147 @@ def _insert_containment(
     )
 
 
+def _build_scored_test_db(tmp_path):
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="de",
+            display_text="de",
+            ngram_size=1,
+            raw_frequency=20,
+            episode_dispersion=5,
+        )
+        _insert_candidate(
+            connection,
+            candidate_key="et",
+            display_text="et",
+            ngram_size=1,
+            raw_frequency=80,
+            episode_dispersion=6,
+        )
+        _insert_candidate(
+            connection,
+            candidate_key="ce",
+            display_text="ce",
+            ngram_size=1,
+            raw_frequency=19,
+            episode_dispersion=5,
+        )
+        pense_que_id = _insert_candidate(
+            connection,
+            candidate_key="pense que",
+            display_text="pense que",
+            ngram_size=2,
+            raw_frequency=10,
+            episode_dispersion=3,
+            t_score=1.0,
+            npmi=0.2,
+            left_entropy=0.2,
+            right_entropy=0.4,
+        )
+        du_coup_id = _insert_candidate(
+            connection,
+            candidate_key="du coup",
+            display_text="du coup",
+            ngram_size=2,
+            raw_frequency=20,
+            episode_dispersion=4,
+            t_score=2.0,
+            npmi=0.6,
+            left_entropy=0.8,
+            right_entropy=0.6,
+        )
+        en_fait_id = _insert_candidate(
+            connection,
+            candidate_key="en fait",
+            display_text="en fait",
+            ngram_size=2,
+            raw_frequency=40,
+            episode_dispersion=6,
+            t_score=4.0,
+            npmi=0.8,
+            left_entropy=1.0,
+            right_entropy=1.2,
+        )
+        _insert_candidate(
+            connection,
+            candidate_key="dans le",
+            display_text="dans le",
+            ngram_size=2,
+            raw_frequency=9,
+            episode_dispersion=4,
+            t_score=3.0,
+            npmi=0.3,
+            left_entropy=0.9,
+            right_entropy=0.9,
+        )
+        je_pense_que_id = _insert_candidate(
+            connection,
+            candidate_key="je pense que",
+            display_text="je pense que",
+            ngram_size=3,
+            raw_frequency=43,
+            episode_dispersion=6,
+            t_score=1.4,
+            npmi=0.9,
+            left_entropy=0.95,
+            right_entropy=0.9,
+        )
+        il_y_a_id = _insert_candidate(
+            connection,
+            candidate_key="il y a",
+            display_text="il y a",
+            ngram_size=3,
+            raw_frequency=20,
+            episode_dispersion=6,
+            t_score=1.0,
+            npmi=0.7,
+            left_entropy=0.8,
+            right_entropy=0.7,
+        )
+        _insert_candidate(
+            connection,
+            candidate_key="j ai envie",
+            display_text="j'ai envie",
+            ngram_size=3,
+            raw_frequency=10,
+            episode_dispersion=3,
+            t_score=0.4,
+            npmi=0.4,
+            left_entropy=0.4,
+            right_entropy=0.6,
+        )
+        _insert_containment(
+            connection,
+            smaller_candidate_id=pense_que_id,
+            larger_candidate_id=je_pense_que_id,
+            shared_occurrence_count=10,
+            shared_episode_count=3,
+        )
+        _insert_containment(
+            connection,
+            smaller_candidate_id=du_coup_id,
+            larger_candidate_id=il_y_a_id,
+            shared_occurrence_count=14,
+            shared_episode_count=4,
+        )
+        _insert_containment(
+            connection,
+            smaller_candidate_id=en_fait_id,
+            larger_candidate_id=je_pense_que_id,
+            shared_occurrence_count=8,
+            shared_episode_count=3,
+        )
+        connection.commit()
+
+    service = CandidateScoresService(db_path=db_path)
+    refresh_result = service.refresh()
+    return db_path, service, refresh_result
+
+
 def test_refresh_candidate_scores_populates_component_scores_and_ranks(tmp_path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)
@@ -507,3 +648,65 @@ def test_refresh_candidate_scores_without_candidates_fails(tmp_path) -> None:
         service.refresh()
 
     assert "no token candidates found" in str(exc_info.value)
+
+
+def test_candidate_scores_summarize_matches_refreshed_counts(tmp_path) -> None:
+    _db_path, service, refresh_result = _build_scored_test_db(tmp_path)
+
+    summary = service.summarize()
+
+    assert summary == refresh_result
+
+
+def test_candidate_scores_list_top_candidates_by_lane(tmp_path) -> None:
+    _db_path, service, _refresh_result = _build_scored_test_db(tmp_path)
+
+    top_1gram_rows = service.list_top_candidates(ngram_size=1, limit=2)
+    top_2gram_rows = service.list_top_candidates(ngram_size=2, limit=2)
+    top_3gram_rows = service.list_top_candidates(ngram_size=3, limit=2)
+
+    assert tuple(row.candidate_key for row in top_1gram_rows) == ("et", "de")
+    assert top_1gram_rows[0].ranking_lane == "1gram"
+    assert top_1gram_rows[0].score_version == SCORE_VERSION
+    assert top_1gram_rows[0].is_eligible == 1
+    assert top_1gram_rows[0].association_score is None
+    assert top_1gram_rows[0].lane_rank == 1
+    assert top_1gram_rows[1].lane_rank == 2
+
+    assert tuple(row.candidate_key for row in top_2gram_rows) == ("en fait", "du coup")
+    assert top_2gram_rows[0].ranking_lane == "2gram"
+    assert top_2gram_rows[0].direct_parent_count == 1
+    assert top_2gram_rows[0].dominant_parent_key == "je pense que"
+    assert top_2gram_rows[0].final_score == pytest.approx(0.9)
+    assert top_2gram_rows[1].lane_rank == 2
+
+    assert tuple(row.candidate_key for row in top_3gram_rows) == ("je pense que", "il y a")
+    assert top_3gram_rows[0].ranking_lane == "3gram"
+    assert top_3gram_rows[0].redundancy_penalty == pytest.approx(0.0)
+    assert top_3gram_rows[0].lane_rank == 1
+
+
+def test_candidate_scores_list_candidates_by_key_keeps_order_and_ineligible_rows(tmp_path) -> None:
+    _db_path, service, _refresh_result = _build_scored_test_db(tmp_path)
+
+    rows = service.list_candidates_by_key(
+        candidate_keys=("ce", "en fait", "missing", "ce", "de")
+    )
+
+    assert tuple(row.candidate_key for row in rows) == ("ce", "en fait", "de")
+
+    ce_row, en_fait_row, de_row = rows
+    assert ce_row.ranking_lane == "1gram"
+    assert ce_row.is_eligible == 0
+    assert ce_row.final_score is None
+    assert ce_row.lane_rank is None
+
+    assert en_fait_row.ranking_lane == "2gram"
+    assert en_fait_row.is_eligible == 1
+    assert en_fait_row.final_score == pytest.approx(0.9)
+    assert en_fait_row.lane_rank == 1
+
+    assert de_row.ranking_lane == "1gram"
+    assert de_row.is_eligible == 1
+    assert de_row.final_score == pytest.approx(0.0)
+    assert de_row.lane_rank == 2

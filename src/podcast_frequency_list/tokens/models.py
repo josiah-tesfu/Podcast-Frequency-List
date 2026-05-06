@@ -112,3 +112,13 @@ class CandidateSummaryRow:
     dominant_parent_shared_count: int | None = None
     dominant_parent_share: float | None = None
     dominant_parent_side: str | None = None
+    score_version: str | None = None
+    ranking_lane: str | None = None
+    is_eligible: int | None = None
+    frequency_score: float | None = None
+    dispersion_score: float | None = None
+    association_score: float | None = None
+    boundary_score: float | None = None
+    redundancy_penalty: float | None = None
+    final_score: float | None = None
+    lane_rank: int | None = None

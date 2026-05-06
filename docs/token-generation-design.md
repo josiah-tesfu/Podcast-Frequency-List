@@ -1823,7 +1823,7 @@ Sanity checks:
 - `du coup`, `en fait`, `je pense`, and `se passe` show lower dominant-parent
   share despite broad any-coverage
 - `3`-grams show no fake covered-by-parent summaries under the current
-  `1`/`2`/`3`-gram cap
+  `1`/`2`/`3`-gram limit
 
 Tests:
 
@@ -1902,12 +1902,12 @@ Deliverables:
 - support gates that cut the sparse tail before scoring
 - lane-specific score formulas for `1`/`2`/`3`-gram candidates
 - conservative redundancy penalty from Step 5
-- lane-aware top candidate report and deck cap surface
+- lane-aware top candidate report and global review surface
 
 Output:
 
 - ranked review list that includes function words, glue phrases, and stronger
-  chunks without letting any one class flood the pilot deck
+  chunks while preserving the natural score progression in the pilot
 
 Step 6 should not be implemented as one broad pass.
 
@@ -1916,7 +1916,7 @@ deterministic, but ranking still has to decide how to handle sparse tails, how
 much raw frequency should matter after `t_score`, how to keep useful
 function-word and glue material visible, and how Step 5 should affect ranking
 without crushing productive candidates. Splitting keeps the score contract
-inspectable and prevents deck-composition policy from being hidden inside one
+inspectable and prevents review-surface policy from being hidden inside one
 large refresh.
 
 Recommended Step 6 stance:
@@ -1938,8 +1938,9 @@ Recommended Step 6 stance:
 - use Step 5 only as a conservative direct-parent penalty; never use
   `covered_by_any` as a general penalty
 - keep `1`-gram redundancy impact off or very mild in v1
-- compose the final review/deck surface with lane caps rather than one flat
-  global pool
+- keep lane-first inspection available as the primary review surface in `v1`
+- allow a global review list to reflect the natural score ordering, even if it
+  begins `1gram`-heavy
 - keep score components and lane ranks inspectable and versioned
 - defer proper-noun penalties, blacklist hooks, and semantic filters to later
   review/tuning work
@@ -1952,7 +1953,7 @@ Deterministic parts:
 - component score computation
 - final score computation once weights are selected
 - lane rank computation
-- deck/report generation from stored scores
+- review/report generation from stored scores
 - repeated reruns
 
 Policy-driven but deterministic after selection:
@@ -1961,8 +1962,9 @@ Policy-driven but deterministic after selection:
 - whether to score all candidates or also store ineligible rows
 - exact component weights
 - whether the `1gram` lane gets any Step 5 penalty in v1
-- deck cap formula and lane shares
-- whether pilot caps are absolute only or also scale with total occurrences
+- whether to expose lane-first sections only or also a global view
+- whether the eventual human-facing export should preserve the natural global
+  progression or add a later composition layer outside Step `6`
 
 Out of scope for Step 6:
 
@@ -2060,7 +2062,7 @@ Scope:
 - mark eligible vs ineligible candidates
 - keep support-gate behavior inspectable
 - no weighted scoring yet
-- no deck cap yet
+- no global review surface yet
 
 Recommended pilot lanes:
 
@@ -2133,7 +2135,7 @@ Scope:
 - compute conservative Step 5 penalty
 - produce final lane-specific scores
 - keep formulas inspectable and linear
-- no deck cap/report composition yet
+- no review-surface composition yet
 
 Recommended component semantics:
 
@@ -2212,90 +2214,225 @@ Exit criteria:
 - final scores are stored, inspectable, and versioned
 - the first ranking remains linear and auditable
 
-#### Step 6D: Lane Caps, Review Surface, And Deck Composition
+#### Step 6D: Review Surface
 
-Turn lane scores into a practical pilot review/deck surface.
+Turn stored lane scores into a practical human-facing pilot review surface.
 
-Scope:
-
-- compute lane ranks
-- expose top ranked candidates by lane
-- define pilot deck caps
-- keep deck composition explicit
-- no example selection yet
-- no blacklist hooks yet
-
-Recommended pilot composition stance:
-
-- do not flatten all lanes into one unconstrained pool
-- keep separate lane ranks for `1gram`, `2gram`, and `3gram`
-- compose pilot review/deck output from lane caps or lane shares
-- keep caps configurable and tied to support volume rather than manual
-  category rejection
-
-Recommended pilot cap surface:
-
-- `word_cap`
-- `bigram_cap`
-- `trigram_cap`
-- optional `total_cap`
-
-Recommended pilot defaults:
-
-- start with a review-first surface, not a final deck export
-- if a total cap is needed, derive it from total occurrence volume and then
-  split it by lane shares
-- keep lane shares configurable so useful function words and glue phrases
-  remain visible without crowding out multiword chunks
-
-Recommended pilot review order:
-
-- within-lane `final_score DESC`, then `raw_frequency DESC`, then
-  `candidate_key`
-- optional combined review view interleaves lanes only after lane caps are
-  applied
+This stage should not ship as one opaque pass.
 
 Reason:
 
-- project goals now include useful function words and glue phrases, so Step 6
-  should balance lanes rather than suppress them globally
-- pilot data showed that each lane has different sparsity and different useful
-  signals
-- explicit lane caps make deck composition visible and tunable instead of
-  burying it inside one global score
+- `6C` already computes and stores `lane_rank`, so `6D` is no longer a scoring
+  step
+- the remaining work is split across two different concerns:
+  - `6D1`: read-only inspection of scored rows
+  - `6D2`: optional global review surface over all eligible rows
+- the first concern is straightforward and mostly mechanical
+- the second concern is still policy-sensitive because it decides whether the
+  repo should expose the natural cross-lane score progression directly or keep
+  review lane-local only
+
+Live pilot clarification:
+
+- a flat global top list is not a neutral presentation
+- with current `pilot-v1` scores, the global top `25` is `23` `1gram`, `1`
+  `2gram`, `1` `3gram`
+- the global top `100` is `81` `1gram`, `12` `2gram`, `7` `3gram`
+- the global top `200` is `122` `1gram`, `42` `2gram`, `36` `3gram`
+- this means a single unconstrained combined review surface begins strongly
+  word-heavy
+- but it also means later portions of the same list naturally shift toward more
+  `2gram` and `3gram` material
+- if that progression matches the intended learning story, then it is not a bug
+- therefore, `v1` should preserve the natural ordering rather than injecting a
+  composition layer here
+
+Recommended stance:
+
+- keep `candidate_scores` as the source of truth for ranking
+- keep `1gram`, `2gram`, and `3gram` lane ranks separate
+- make the primary `v1` review surface lane-first, not globally flattened
+- if a global view is exposed, derive it directly from the stored scores
+- keep all `6D` work read-only: no schema change, no new score storage, no
+  hidden pruning, no composition overrides
+
+#### Step 6D1: Ranked Review Surface
+
+Expose the stored Step `6C` ranking in an inspectable CLI/query surface before
+adding any broader export policy.
+
+Scope:
+
+- add scored-candidate query methods over `candidate_scores`
+- expose top ranked candidates by lane
+- expose focus lookup by candidate key
+- expose score metadata such as `score_version`, eligible counts, and
+  per-lane result counts
+- keep the output read-only
+- do not add a combined cross-lane review list yet
+
+Recommended semantics:
+
+- primary output is separate ranked sections for `1gram`, `2gram`, and `3gram`
+- ordering within each lane is:
+  - `lane_rank ASC`
+  - this should already imply `final_score DESC`, `raw_frequency DESC`, then
+    `candidate_key`
+- output rows should expose:
+  - Step `3` support facts
+  - Step `4` association/boundary facts where present
+  - Step `5` containment facts where present
+  - Step `6` fields at minimum:
+    - `score_version`
+    - `ranking_lane`
+    - `is_eligible`
+    - `frequency_score`
+    - `dispersion_score`
+    - `association_score`
+    - `boundary_score`
+    - `redundancy_penalty`
+    - `final_score`
+    - `lane_rank`
+- focus lookup should return scored rows for explicit candidate keys even if
+  they are ineligible
+- ineligible rows remain inspectable, but they should never appear in the
+  default top-ranked sections
+
+Recommended CLI surface:
+
+- `refresh-candidate-scores` remains the write path
+- add `inspect-candidate-scores --limit N`
+- keep the same broad shape as `inspect-candidate-metrics`:
+  - validation/header fields first
+  - top rows by lane
+  - focus rows by candidate key
+- reuse the existing candidate-inspection emitter pattern where practical so
+  the output stays coherent with earlier stages
+
+Reason:
+
+- `6C` produced a scored surface, but it is not yet conveniently inspectable
+- review needs to happen against stored score components, not against ad hoc DB
+  probes
+- a lane-first inspection surface can validate score behavior without yet
+  deciding whether the natural cross-lane ordering needs any later
+  presentation policy
 
 Validation:
 
-- lane ranks are deterministic
-- capped review surfaces are deterministic
-- changing a cap changes only deck composition, not stored component scores
+- per-lane ranked output is deterministic
+- focus lookup is deterministic
+- no query path changes the stored score rows
+- top sections exclude ineligible rows
+- focus sections can still show ineligible rows
 
 Sanity checks:
 
-- `1gram` lane still contains function words and common lexical words
-- `2gram` lane contains both glue-like scaffolding and stronger chunks, ordered
-  by score rather than by category
-- `3gram` lane contains cohesive spoken frames without flooding on low-support
-  tails
-- no candidate disappears because of hidden pruning outside the explicit
-  support gates and lane caps
+- `1gram` top rows still include function words and common lexical words
+- `2gram` top rows include both glue-like scaffolding and stronger chunks
+- `3gram` top rows include cohesive spoken frames
+- focus rows show why a candidate ranks where it does by exposing component
+  scores and penalties
+- obvious direct-parent fragments such as `pense que` and `me dis` look weak
+  for visible reasons rather than just disappearing
 
 Tests:
 
-- lane rank test
 - per-lane top list query test
-- cap application test
-- no regression in existing inspection output
+- focus lookup test
+- ineligible-row exclusion test for top sections
+- score-field emission test
+- no regression in existing candidate-metrics inspection output
 
 Exit criteria:
 
-- pilot review/deck surface is explicit
-- deck composition can be tuned without changing score storage
+- stored Step `6C` rankings are inspectable without raw SQL
+- score components are visible enough to support policy review
+- the repo has a stable read path for Step `6` before any optional cross-lane
+  review surface is added
+
+#### Step 6D2: Global Review Surface
+
+Expose the natural cross-lane ranking as a read-only global review surface,
+without any extra composition logic.
+
+Scope:
+
+- add a combined global top list over eligible scored rows
+- keep lane labels visible inside the global view
+- optionally expose a global rank field
+- keep the global view read-only and directly derived from stored scores
+- no example selection yet
+- no blacklist hooks yet
+
+Recommended pilot review stance:
+
+- keep per-lane sections as the primary explanation surface
+- treat the global list as a secondary inspection surface that shows what the
+  current score policy naturally prefers
+- do not inject hand-tuned interleaving rules
+- if a bounded output is needed later, keep it outside this `v1` Step `6D`
+
+Recommended pilot review order:
+
+- global view:
+  - `final_score DESC`
+  - `raw_frequency DESC`
+  - `candidate_key`
+- keep `ranking_lane` visible in each global row so the user can see the lane
+  mix directly
+- avoid clever interleaving logic in `v1`
+
+Reason:
+
+- the current direction explicitly prefers preserving the natural progression
+- live data already showed that the global list starts word-heavy but
+  later shifts toward more `2gram` and `3gram` material
+- exposing that natural progression is useful because it reveals what the
+  current score policy is actually doing
+- keeping `6D` free of composition logic makes the surface simpler and easier
+  to audit
+
+Validation:
+
+- global review output is deterministic
+- changing the requested `--limit` changes only how far down the natural list
+  the output extends
+- the global view never changes stored component scores or lane ranks
+- no ineligible rows appear in the default global top list
+
+Sanity checks:
+
+- early global rows can be strongly `1gram`-heavy without that being treated as
+  an automatic defect
+- later global rows show increasing `2gram` and `3gram` presence
+- no candidate disappears because of hidden pruning outside explicit support
+  gates
+- the per-lane sections and the global view tell a coherent story about the
+  same stored scores
+- useful function words, glue phrases, and stronger chunks all remain visible,
+  just at different depths of the review surface
+
+Tests:
+
+- global list query test
+- global ordering test
+- global row emission test
+- limit determinism test
+- no regression in the lane-first `6D1` inspection surface
+
+Exit criteria:
+
+- the repo has both lane-first and global inspection surfaces
+- the global view reflects stored scores directly, without hidden composition
+  policy
+- Step `6E` can validate both lane quality and the natural cross-lane
+  progression
 
 #### Step 6E: Pilot Validation
 
-Run the first ranking and inspect whether the resulting lanes and caps match
-the project goals.
+Run the first ranking and inspect whether the resulting lanes and global review
+surface match the project goals.
 
 Required commands:
 
@@ -2327,9 +2464,10 @@ Sanity checks:
   gate
 - `et le`, `est que`, `c est que`, `c est pas`, and similar weak fragments do
   not dominate the top of the eligible lanes
-- `1gram` lane remains useful but does not erase the `2gram`/`3gram` surfaces
-  when caps are applied
-- changing lane caps changes composition, not the underlying scores
+- the global review surface begins word-heavy but later shifts toward more
+  `2gram` and `3gram` material in a way that still feels useful
+- the global review surface reflects stored scores directly rather than hidden
+  composition rules
 
 Tests:
 
@@ -2392,28 +2530,30 @@ stable candidate facts -> stored unithood metrics for multiword candidates
 Current completed target:
 
 ```text
-stored unithood metrics -> stored direct-parent containment facts and
-inspectable dominance summaries
+stored lane-scoped candidate scores with explicit redundancy penalty ->
+inspectable ranked review surface
 ```
 
 Next implementation target:
 
 ```text
-inspectable dominance summaries -> first ranking with explicit redundancy
-penalty
+inspectable ranked review surface -> global review surface
 ```
 
 Reason:
 
 - candidate facts are now refreshed into inspectable frequency, dispersion,
   association, boundary, and containment metrics
-- pilot analysis showed that whole-inventory ranking is too sparse and needs
+- pilot analysis showed that whole-inventory ranking is too sparse and needed
   support gates before normalization
 - pilot analysis also showed that `show_dispersion` is unusable in the current
   one-show snapshot and that `covered_by_any` is too degenerate for ranking
-- useful function words and glue phrases should remain in scope, so Step 6 must
-  balance lanes and caps rather than applying blanket suppression
-- splitting Step 6 into schema, gates, scoring, deck composition, and pilot
-  validation keeps ranking policy explicit and reviewable
+- stored `6C` scores now have a first-class lane inspection surface
+- live ranked data also showed that the global list starts heavily
+  `1gram`-weighted but gradually shifts toward more multiword material, which
+  may be a feature rather than a bug
+- splitting `6D` into lane-first inspection first and optional global
+  inspection second keeps the surface reviewable without imposing extra
+  composition policy
 
-Next step: Step 6D, Lane Caps, Review Surface, And Deck Composition.
+Next step: Step 6D2, Global Review Surface.

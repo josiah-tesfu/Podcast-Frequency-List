@@ -417,6 +417,9 @@ class FakeCandidateMetricsService:
 class FakeCandidateScoresService:
     def __init__(self) -> None:
         self.refresh_calls = 0
+        self.summary_calls = 0
+        self.top_candidate_requests: list[tuple[int, int]] = []
+        self.focus_candidate_requests: list[tuple[str, ...]] = []
 
     def refresh(self) -> CandidateScoresResult:
         self.refresh_calls += 1
@@ -431,6 +434,117 @@ class FakeCandidateScoresService:
             eligible_3gram_candidates=146,
         )
 
+    def summarize(self) -> CandidateScoresResult:
+        self.summary_calls += 1
+        return CandidateScoresResult(
+            inventory_version="1",
+            score_version="pilot-v1",
+            selected_candidates=49_542,
+            stored_candidates=49_542,
+            eligible_candidates=804,
+            eligible_1gram_candidates=205,
+            eligible_2gram_candidates=453,
+            eligible_3gram_candidates=146,
+        )
+
+    def list_top_candidates(
+        self,
+        *,
+        ngram_size: int,
+        limit: int = 20,
+        inventory_version: str = "1",
+        score_version: str = "pilot-v1",
+    ) -> tuple[CandidateSummaryRow, ...]:
+        self.top_candidate_requests.append((ngram_size, limit))
+        return (
+            CandidateSummaryRow(
+                candidate_key=f"score-candidate-{ngram_size}",
+                display_text=f"score candidate {ngram_size}",
+                ngram_size=ngram_size,
+                raw_frequency=10 * ngram_size,
+                episode_dispersion=ngram_size + 1,
+                show_dispersion=1,
+                t_score=None if ngram_size == 1 else 2.5 * ngram_size,
+                npmi=None if ngram_size == 1 else 0.5 + (0.1 * ngram_size),
+                left_context_type_count=None if ngram_size == 1 else ngram_size,
+                right_context_type_count=None if ngram_size == 1 else ngram_size + 1,
+                left_entropy=None if ngram_size == 1 else 0.2 * ngram_size,
+                right_entropy=None if ngram_size == 1 else 0.3 * ngram_size,
+                covered_by_any_count=None if ngram_size == 3 else ngram_size,
+                covered_by_any_ratio=None if ngram_size == 3 else 0.25 * ngram_size,
+                independent_occurrence_count=None if ngram_size == 3 else 9 * ngram_size,
+                direct_parent_count=None if ngram_size == 3 else ngram_size + 1,
+                dominant_parent_key=None if ngram_size == 3 else f"parent-{ngram_size}",
+                dominant_parent_shared_count=None if ngram_size == 3 else ngram_size + 2,
+                dominant_parent_share=None if ngram_size == 3 else 0.15 * ngram_size,
+                dominant_parent_side=None if ngram_size == 3 else "left",
+                score_version=score_version,
+                ranking_lane=f"{ngram_size}gram",
+                is_eligible=1,
+                frequency_score=0.3 * ngram_size,
+                dispersion_score=0.2 * ngram_size,
+                association_score=None if ngram_size == 1 else 0.4 * ngram_size,
+                boundary_score=None if ngram_size == 1 else 0.1 * ngram_size,
+                redundancy_penalty=0.0,
+                final_score=0.5 * ngram_size,
+                lane_rank=1,
+            ),
+        )
+
+    def list_candidates_by_key(
+        self,
+        *,
+        candidate_keys: tuple[str, ...] | list[str],
+        inventory_version: str = "1",
+        score_version: str = "pilot-v1",
+    ) -> tuple[CandidateSummaryRow, ...]:
+        requested_keys = tuple(candidate_keys)
+        self.focus_candidate_requests.append(requested_keys)
+
+        rows: list[CandidateSummaryRow] = []
+        for key in requested_keys:
+            if key == "missing":
+                continue
+            ngram_size = max(1, len(key.split()))
+            rows.append(
+                CandidateSummaryRow(
+                    candidate_key=key,
+                    display_text=key,
+                    ngram_size=ngram_size,
+                    raw_frequency=7,
+                    episode_dispersion=3,
+                    show_dispersion=1,
+                    t_score=4.2 if ngram_size >= 2 else None,
+                    npmi=0.77 if ngram_size >= 2 else None,
+                    left_context_type_count=2 if ngram_size >= 2 else None,
+                    right_context_type_count=3 if ngram_size >= 2 else None,
+                    left_entropy=0.41 if ngram_size >= 2 else None,
+                    right_entropy=0.92 if ngram_size >= 2 else None,
+                    covered_by_any_count=4 if ngram_size < 3 else None,
+                    covered_by_any_ratio=0.57 if ngram_size < 3 else None,
+                    independent_occurrence_count=3 if ngram_size < 3 else None,
+                    direct_parent_count=2 if ngram_size < 3 else None,
+                    dominant_parent_key="je en fait" if ngram_size < 3 else None,
+                    dominant_parent_shared_count=3 if ngram_size < 3 else None,
+                    dominant_parent_share=0.43 if ngram_size < 3 else None,
+                    dominant_parent_side="left" if ngram_size < 3 else None,
+                    score_version=score_version,
+                    ranking_lane=f"{ngram_size}gram",
+                    is_eligible=0 if key == "de" else 1,
+                    frequency_score=0.44,
+                    dispersion_score=0.33,
+                    association_score=0.77 if ngram_size >= 2 else None,
+                    boundary_score=0.22 if ngram_size >= 2 else None,
+                    redundancy_penalty=0.11 if ngram_size == 2 else 0.0,
+                    final_score=0.66,
+                    lane_rank=None if key == "de" else 5,
+                )
+            )
+        return tuple(rows)
+
+    def close(self) -> None:
+        return None
+
 
 def test_cli_help() -> None:
     result = runner.invoke(app, ["--help"])
@@ -440,6 +554,7 @@ def test_cli_help() -> None:
     assert "generate-candidates" in result.stdout
     assert "refresh-candidate-metrics" in result.stdout
     assert "inspect-candidate-metrics" in result.stdout
+    assert "inspect-candidate-scores" in result.stdout
 
 
 def test_init_db_creates_database(tmp_path, monkeypatch) -> None:
@@ -927,6 +1042,121 @@ def test_refresh_candidate_scores_prints_stats(tmp_path, monkeypatch) -> None:
         "eligible_3gram_candidates=146",
     ]
     assert fake_service.refresh_calls == 1
+
+    load_settings.cache_clear()
+
+
+def test_inspect_candidate_scores_prints_summary_and_rows(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateScoresService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_scores_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "inspect-candidate-scores",
+            "--limit",
+            "2",
+            "--candidate-key",
+            "en fait",
+            "--candidate-key",
+            "de",
+            "--candidate-key",
+            "missing",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "score_version=pilot-v1" in result.stdout
+    assert "stored_candidates=49542" in result.stdout
+    assert "eligible_candidates=804" in result.stdout
+    assert "top_candidate_count_1gram=1" in result.stdout
+    assert "top_candidate_count_2gram=1" in result.stdout
+    assert "top_candidate_count_3gram=1" in result.stdout
+    assert (
+        "record=top_1gram\trank=1\tcandidate_key=score-candidate-1"
+        "\tdisplay_text=score candidate 1\tngram_size=1\traw_frequency=10"
+        "\tepisode_dispersion=2\tshow_dispersion=1\tcovered_by_any_count=1"
+        "\tcovered_by_any_ratio=0.25\tindependent_occurrence_count=9"
+        "\tdirect_parent_count=2\tdominant_parent_key=parent-1"
+        "\tdominant_parent_shared_count=3\tdominant_parent_share=0.15"
+        "\tdominant_parent_side=left\tscore_version=pilot-v1\tranking_lane=1gram"
+        "\tis_eligible=1\tfrequency_score=0.3\tdispersion_score=0.2"
+        "\tassociation_score=-\tboundary_score=-\tredundancy_penalty=0.0"
+        "\tfinal_score=0.5\tlane_rank=1"
+        in result.stdout
+    )
+    assert (
+        "record=top_2gram\trank=1\tcandidate_key=score-candidate-2"
+        "\tdisplay_text=score candidate 2\tngram_size=2\traw_frequency=20"
+        "\tepisode_dispersion=3\tshow_dispersion=1\tt_score=5.0\tnpmi=0.7"
+        "\tleft_context_type_count=2\tright_context_type_count=3"
+        "\tleft_entropy=0.4\tright_entropy=0.6\tcovered_by_any_count=2"
+        "\tcovered_by_any_ratio=0.5\tindependent_occurrence_count=18"
+        "\tdirect_parent_count=3\tdominant_parent_key=parent-2"
+        "\tdominant_parent_shared_count=4\tdominant_parent_share=0.3"
+        "\tdominant_parent_side=left\tscore_version=pilot-v1\tranking_lane=2gram"
+        "\tis_eligible=1\tfrequency_score=0.6\tdispersion_score=0.4"
+        "\tassociation_score=0.8\tboundary_score=0.2\tredundancy_penalty=0.0"
+        "\tfinal_score=1.0\tlane_rank=1"
+        in result.stdout
+    )
+    assert (
+        "record=focus_candidate\trank=2\tcandidate_key=de\tdisplay_text=de"
+        "\tngram_size=1\traw_frequency=7\tepisode_dispersion=3\tshow_dispersion=1"
+        "\tt_score=-\tnpmi=-\tleft_context_type_count=-\tright_context_type_count=-"
+        "\tleft_entropy=-\tright_entropy=-\tcovered_by_any_count=4"
+        "\tcovered_by_any_ratio=0.57\tindependent_occurrence_count=3"
+        "\tdirect_parent_count=2\tdominant_parent_key=je en fait"
+        "\tdominant_parent_shared_count=3\tdominant_parent_share=0.43"
+        "\tdominant_parent_side=left\tscore_version=pilot-v1\tranking_lane=1gram"
+        "\tis_eligible=0\tfrequency_score=0.44\tdispersion_score=0.33"
+        "\tassociation_score=-\tboundary_score=-\tredundancy_penalty=0.0"
+        "\tfinal_score=0.66\tlane_rank=-"
+        in result.stdout
+    )
+    assert "focus_missing_count=1" in result.stdout
+    assert "focus_missing=missing" in result.stdout
+    assert fake_service.summary_calls == 1
+    assert fake_service.top_candidate_requests == [(1, 2), (2, 2), (3, 2)]
+    assert fake_service.focus_candidate_requests == [("en fait", "de", "missing")]
+
+    load_settings.cache_clear()
+
+
+def test_inspect_candidate_scores_fails_without_scores(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCandidateScoresService()
+    fake_service.summarize = lambda: CandidateScoresResult(
+        inventory_version="1",
+        score_version="pilot-v1",
+        selected_candidates=23,
+        stored_candidates=0,
+        eligible_candidates=0,
+        eligible_1gram_candidates=0,
+        eligible_2gram_candidates=0,
+        eligible_3gram_candidates=0,
+    )
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_candidate_scores_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(app, ["inspect-candidate-scores"])
+
+    assert result.exit_code == 1
+    assert "error=no candidate scores found for score inspection" in result.stdout
 
     load_settings.cache_clear()
 

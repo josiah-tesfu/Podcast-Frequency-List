@@ -107,6 +107,7 @@ def emit_candidate_rows(
     record_type: str,
     include_step4: bool = False,
     include_step5: bool = False,
+    include_step6: bool = False,
 ) -> None:
     for rank, row in enumerate(rows, start=1):
         fields: list[tuple[str, object]] = [
@@ -171,6 +172,21 @@ def emit_candidate_rows(
                         "dominant_parent_side",
                         _optional_metric_value(row.dominant_parent_side),
                     ),
+                ]
+            )
+        if include_step6:
+            fields.extend(
+                [
+                    ("score_version", _optional_metric_value(row.score_version)),
+                    ("ranking_lane", _optional_metric_value(row.ranking_lane)),
+                    ("is_eligible", _optional_metric_value(row.is_eligible)),
+                    ("frequency_score", _optional_metric_value(row.frequency_score)),
+                    ("dispersion_score", _optional_metric_value(row.dispersion_score)),
+                    ("association_score", _optional_metric_value(row.association_score)),
+                    ("boundary_score", _optional_metric_value(row.boundary_score)),
+                    ("redundancy_penalty", _optional_metric_value(row.redundancy_penalty)),
+                    ("final_score", _optional_metric_value(row.final_score)),
+                    ("lane_rank", _optional_metric_value(row.lane_rank)),
                 ]
             )
         emit_record(fields)
