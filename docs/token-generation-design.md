@@ -2530,14 +2530,13 @@ stable candidate facts -> stored unithood metrics for multiword candidates
 Current completed target:
 
 ```text
-stored lane-scoped candidate scores with explicit redundancy penalty ->
-inspectable ranked review surface
+inspectable ranked review surface -> global review surface
 ```
 
 Next implementation target:
 
 ```text
-inspectable ranked review surface -> global review surface
+global review surface -> pilot validation
 ```
 
 Reason:
@@ -2548,12 +2547,11 @@ Reason:
   support gates before normalization
 - pilot analysis also showed that `show_dispersion` is unusable in the current
   one-show snapshot and that `covered_by_any` is too degenerate for ranking
-- stored `6C` scores now have a first-class lane inspection surface
+- stored `6C` scores now have both lane-first and global inspection surfaces
 - live ranked data also showed that the global list starts heavily
   `1gram`-weighted but gradually shifts toward more multiword material, which
   may be a feature rather than a bug
-- splitting `6D` into lane-first inspection first and optional global
-  inspection second keeps the surface reviewable without imposing extra
-  composition policy
+- splitting `6D` into lane-first inspection first and global inspection second
+  kept the read surface reviewable without imposing extra composition policy
 
-Next step: Step 6D2, Global Review Surface.
+Next step: Step 6E, Pilot Validation.

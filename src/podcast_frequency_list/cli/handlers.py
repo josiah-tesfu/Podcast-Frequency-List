@@ -123,6 +123,7 @@ def inspect_candidate_scores(
 
     emit_candidate_scores_result(summary)
     _emit_top_scored_candidates(service, limit=limit)
+    _emit_global_scored_candidates(service, limit=limit)
     _emit_focus_scored_candidates(service, candidate_keys=candidate_keys)
 
 
@@ -141,6 +142,22 @@ def _emit_top_scored_candidates(
             include_step5=ngram_size <= 2,
             include_step6=True,
         )
+
+
+def _emit_global_scored_candidates(
+    service: CandidateScoresService,
+    *,
+    limit: int,
+) -> None:
+    rows = service.list_global_candidates(limit=limit)
+    emit_fields((("top_candidate_count_global", len(rows)),))
+    emit_candidate_rows(
+        rows,
+        record_type="top_global",
+        include_step4=True,
+        include_step5=True,
+        include_step6=True,
+    )
 
 
 def _emit_focus_scored_candidates(

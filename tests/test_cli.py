@@ -419,6 +419,7 @@ class FakeCandidateScoresService:
         self.refresh_calls = 0
         self.summary_calls = 0
         self.top_candidate_requests: list[tuple[int, int]] = []
+        self.global_candidate_requests: list[int] = []
         self.focus_candidate_requests: list[tuple[str, ...]] = []
 
     def refresh(self) -> CandidateScoresResult:
@@ -490,6 +491,75 @@ class FakeCandidateScoresService:
                 lane_rank=1,
             ),
         )
+
+    def list_global_candidates(
+        self,
+        *,
+        limit: int = 20,
+        inventory_version: str = "1",
+        score_version: str = "pilot-v1",
+    ) -> tuple[CandidateSummaryRow, ...]:
+        self.global_candidate_requests.append(limit)
+        return (
+            CandidateSummaryRow(
+                candidate_key="global-candidate-1",
+                display_text="global candidate 1",
+                ngram_size=1,
+                raw_frequency=50,
+                episode_dispersion=6,
+                show_dispersion=1,
+                covered_by_any_count=50,
+                covered_by_any_ratio=1.0,
+                independent_occurrence_count=0,
+                direct_parent_count=10,
+                dominant_parent_key="de la",
+                dominant_parent_shared_count=5,
+                dominant_parent_share=0.1,
+                dominant_parent_side="right",
+                score_version=score_version,
+                ranking_lane="1gram",
+                is_eligible=1,
+                frequency_score=0.9,
+                dispersion_score=1.0,
+                association_score=None,
+                boundary_score=None,
+                redundancy_penalty=0.0,
+                final_score=0.95,
+                lane_rank=2,
+            ),
+            CandidateSummaryRow(
+                candidate_key="global-candidate-2",
+                display_text="global candidate 2",
+                ngram_size=2,
+                raw_frequency=40,
+                episode_dispersion=5,
+                show_dispersion=1,
+                t_score=6.0,
+                npmi=0.8,
+                left_context_type_count=3,
+                right_context_type_count=4,
+                left_entropy=0.7,
+                right_entropy=0.8,
+                covered_by_any_count=40,
+                covered_by_any_ratio=1.0,
+                independent_occurrence_count=0,
+                direct_parent_count=6,
+                dominant_parent_key="c est un",
+                dominant_parent_shared_count=8,
+                dominant_parent_share=0.2,
+                dominant_parent_side="right",
+                score_version=score_version,
+                ranking_lane="2gram",
+                is_eligible=1,
+                frequency_score=0.8,
+                dispersion_score=0.9,
+                association_score=0.85,
+                boundary_score=0.75,
+                redundancy_penalty=0.0,
+                final_score=0.9,
+                lane_rank=1,
+            ),
+        )[:limit]
 
     def list_candidates_by_key(
         self,
@@ -1080,6 +1150,7 @@ def test_inspect_candidate_scores_prints_summary_and_rows(tmp_path, monkeypatch)
     assert "top_candidate_count_1gram=1" in result.stdout
     assert "top_candidate_count_2gram=1" in result.stdout
     assert "top_candidate_count_3gram=1" in result.stdout
+    assert "top_candidate_count_global=2" in result.stdout
     assert (
         "record=top_1gram\trank=1\tcandidate_key=score-candidate-1"
         "\tdisplay_text=score candidate 1\tngram_size=1\traw_frequency=10"
@@ -1109,6 +1180,36 @@ def test_inspect_candidate_scores_prints_summary_and_rows(tmp_path, monkeypatch)
         in result.stdout
     )
     assert (
+        "record=top_global\trank=1\tcandidate_key=global-candidate-1"
+        "\tdisplay_text=global candidate 1\tngram_size=1\traw_frequency=50"
+        "\tepisode_dispersion=6\tshow_dispersion=1\tt_score=-\tnpmi=-"
+        "\tleft_context_type_count=-\tright_context_type_count=-"
+        "\tleft_entropy=-\tright_entropy=-\tcovered_by_any_count=50"
+        "\tcovered_by_any_ratio=1.0\tindependent_occurrence_count=0"
+        "\tdirect_parent_count=10\tdominant_parent_key=de la"
+        "\tdominant_parent_shared_count=5\tdominant_parent_share=0.1"
+        "\tdominant_parent_side=right\tscore_version=pilot-v1"
+        "\tranking_lane=1gram\tis_eligible=1\tfrequency_score=0.9"
+        "\tdispersion_score=1.0\tassociation_score=-\tboundary_score=-"
+        "\tredundancy_penalty=0.0\tfinal_score=0.95\tlane_rank=2"
+        in result.stdout
+    )
+    assert (
+        "record=top_global\trank=2\tcandidate_key=global-candidate-2"
+        "\tdisplay_text=global candidate 2\tngram_size=2\traw_frequency=40"
+        "\tepisode_dispersion=5\tshow_dispersion=1\tt_score=6.0\tnpmi=0.8"
+        "\tleft_context_type_count=3\tright_context_type_count=4"
+        "\tleft_entropy=0.7\tright_entropy=0.8\tcovered_by_any_count=40"
+        "\tcovered_by_any_ratio=1.0\tindependent_occurrence_count=0"
+        "\tdirect_parent_count=6\tdominant_parent_key=c est un"
+        "\tdominant_parent_shared_count=8\tdominant_parent_share=0.2"
+        "\tdominant_parent_side=right\tscore_version=pilot-v1"
+        "\tranking_lane=2gram\tis_eligible=1\tfrequency_score=0.8"
+        "\tdispersion_score=0.9\tassociation_score=0.85\tboundary_score=0.75"
+        "\tredundancy_penalty=0.0\tfinal_score=0.9\tlane_rank=1"
+        in result.stdout
+    )
+    assert (
         "record=focus_candidate\trank=2\tcandidate_key=de\tdisplay_text=de"
         "\tngram_size=1\traw_frequency=7\tepisode_dispersion=3\tshow_dispersion=1"
         "\tt_score=-\tnpmi=-\tleft_context_type_count=-\tright_context_type_count=-"
@@ -1126,6 +1227,7 @@ def test_inspect_candidate_scores_prints_summary_and_rows(tmp_path, monkeypatch)
     assert "focus_missing=missing" in result.stdout
     assert fake_service.summary_calls == 1
     assert fake_service.top_candidate_requests == [(1, 2), (2, 2), (3, 2)]
+    assert fake_service.global_candidate_requests == [2]
     assert fake_service.focus_candidate_requests == [("en fait", "de", "missing")]
 
     load_settings.cache_clear()

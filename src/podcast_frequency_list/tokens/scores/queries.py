@@ -173,6 +173,17 @@ class _CandidateScoreSummaryStore:
             limit=limit,
         )
 
+    def list_global_candidates(
+        self,
+        *,
+        limit: int,
+    ) -> tuple[CandidateSummaryRow, ...]:
+        return self._list_rows(
+            where_sql="score.is_eligible = 1",
+            order_sql="score.final_score DESC, cand.raw_frequency DESC, cand.candidate_key",
+            limit=limit,
+        )
+
     def _list_rows(
         self,
         *,

@@ -67,6 +67,22 @@ class CandidateScoresService:
                 score_version=score_version,
             ).list_top_candidates(ngram_size=ngram_size, limit=limit)
 
+    def list_global_candidates(
+        self,
+        *,
+        limit: int = DEFAULT_SUMMARY_LIMIT,
+        inventory_version: str = INVENTORY_VERSION,
+        score_version: str = SCORE_VERSION,
+    ) -> tuple[CandidateSummaryRow, ...]:
+        _validate_limit(limit)
+
+        with connect(self.db_path) as connection:
+            return _CandidateScoreSummaryStore(
+                connection=connection,
+                inventory_version=inventory_version,
+                score_version=score_version,
+            ).list_global_candidates(limit=limit)
+
     def refresh(
         self,
         *,

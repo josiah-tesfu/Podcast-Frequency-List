@@ -710,3 +710,32 @@ def test_candidate_scores_list_candidates_by_key_keeps_order_and_ineligible_rows
     assert de_row.is_eligible == 1
     assert de_row.final_score == pytest.approx(0.0)
     assert de_row.lane_rank == 2
+
+
+def test_candidate_scores_list_global_candidates_uses_cross_lane_score_order(tmp_path) -> None:
+    _db_path, service, _refresh_result = _build_scored_test_db(tmp_path)
+
+    rows = service.list_global_candidates(limit=5)
+
+    assert tuple(row.candidate_key for row in rows) == (
+        "et",
+        "je pense que",
+        "en fait",
+        "il y a",
+        "du coup",
+    )
+    assert [row.ranking_lane for row in rows] == [
+        "1gram",
+        "3gram",
+        "2gram",
+        "3gram",
+        "2gram",
+    ]
+    assert [row.is_eligible for row in rows] == [1, 1, 1, 1, 1]
+    assert rows[0].final_score == pytest.approx(1.0)
+    assert rows[1].final_score == pytest.approx(1.0)
+    assert rows[2].final_score == pytest.approx(0.9)
+    assert rows[2].lane_rank == 1
+    assert rows[3].lane_rank == 2
+    assert rows[4].lane_rank == 2
+    assert all(row.candidate_key != "ce" for row in rows)
