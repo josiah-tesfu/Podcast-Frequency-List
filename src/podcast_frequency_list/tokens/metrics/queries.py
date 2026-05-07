@@ -19,6 +19,13 @@ _SUMMARY_COLUMNS_SQL = f"""
     cand.right_context_type_count,
     cand.left_entropy,
     cand.right_entropy,
+    cand.punctuation_gap_occurrence_count,
+    cand.punctuation_gap_occurrence_ratio,
+    cand.punctuation_gap_edge_clitic_count,
+    cand.punctuation_gap_edge_clitic_ratio,
+    cand.max_component_information,
+    cand.min_component_information,
+    cand.high_information_token_count,
     CASE
         WHEN cand.ngram_size < {DEFAULT_MAX_NGRAM_SIZE}
         THEN COALESCE(covered_occurrences.covered_by_any_count, 0)
@@ -149,12 +156,14 @@ class _CandidateSummaryStore:
         *,
         ngram_size: int,
         limit: int,
+        offset: int = 0,
     ) -> tuple[CandidateSummaryRow, ...]:
         return self._list_rows(
             where_sql="cand.ngram_size = ?",
             parameters=(ngram_size,),
             order_sql=_SUMMARY_ORDER_SQL,
             limit=limit,
+            offset=offset,
         )
 
     def _list_rows(
@@ -164,6 +173,7 @@ class _CandidateSummaryStore:
         parameters: tuple[object, ...] = (),
         order_sql: str = "",
         limit: int | None = None,
+        offset: int = 0,
     ) -> tuple[CandidateSummaryRow, ...]:
         sql_lines = [
             _SUMMARY_CTES_SQL,
@@ -192,6 +202,12 @@ class _CandidateSummaryStore:
         if limit is not None:
             sql_lines.append("LIMIT ?")
             query_parameters.append(limit)
+
+        if offset > 0:
+            if limit is None:
+                sql_lines.append("LIMIT -1")
+            sql_lines.append("OFFSET ?")
+            query_parameters.append(offset)
 
         rows = self.connection.execute(
             "\n".join(sql_lines),
@@ -228,6 +244,13 @@ def _row_to_summary(row: Row) -> CandidateSummaryRow:
         right_context_type_count=_row_int(row, "right_context_type_count"),
         left_entropy=_row_float(row, "left_entropy"),
         right_entropy=_row_float(row, "right_entropy"),
+        punctuation_gap_occurrence_count=_row_int(row, "punctuation_gap_occurrence_count"),
+        punctuation_gap_occurrence_ratio=_row_float(row, "punctuation_gap_occurrence_ratio"),
+        punctuation_gap_edge_clitic_count=_row_int(row, "punctuation_gap_edge_clitic_count"),
+        punctuation_gap_edge_clitic_ratio=_row_float(row, "punctuation_gap_edge_clitic_ratio"),
+        max_component_information=_row_float(row, "max_component_information"),
+        min_component_information=_row_float(row, "min_component_information"),
+        high_information_token_count=_row_int(row, "high_information_token_count"),
         covered_by_any_count=_row_int(row, "covered_by_any_count"),
         covered_by_any_ratio=_row_float(row, "covered_by_any_ratio"),
         independent_occurrence_count=_row_int(row, "independent_occurrence_count"),

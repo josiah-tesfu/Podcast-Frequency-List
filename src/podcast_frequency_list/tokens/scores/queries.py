@@ -20,6 +20,13 @@ _SCORE_SUMMARY_COLUMNS_SQL = f"""
     cand.right_context_type_count,
     cand.left_entropy,
     cand.right_entropy,
+    cand.punctuation_gap_occurrence_count,
+    cand.punctuation_gap_occurrence_ratio,
+    cand.punctuation_gap_edge_clitic_count,
+    cand.punctuation_gap_edge_clitic_ratio,
+    cand.max_component_information,
+    cand.min_component_information,
+    cand.high_information_token_count,
     CASE
         WHEN cand.ngram_size < {DEFAULT_MAX_NGRAM_SIZE}
         THEN COALESCE(covered_occurrences.covered_by_any_count, 0)
@@ -57,6 +64,9 @@ _SCORE_SUMMARY_COLUMNS_SQL = f"""
     END AS dominant_parent_side,
     score.score_version,
     score.ranking_lane,
+    score.passes_support_gate,
+    score.passes_quality_gate,
+    score.discard_family,
     score.is_eligible,
     score.frequency_score,
     score.dispersion_score,
@@ -164,6 +174,7 @@ class _CandidateScoreSummaryStore:
         *,
         ngram_size: int,
         limit: int,
+        offset: int = 0,
     ) -> tuple[CandidateSummaryRow, ...]:
         lane_name = _LANE_SPECS[ngram_size].ranking_lane
         return self._list_rows(
@@ -171,17 +182,20 @@ class _CandidateScoreSummaryStore:
             parameters=(lane_name,),
             order_sql="score.lane_rank ASC",
             limit=limit,
+            offset=offset,
         )
 
     def list_global_candidates(
         self,
         *,
         limit: int,
+        offset: int = 0,
     ) -> tuple[CandidateSummaryRow, ...]:
         return self._list_rows(
             where_sql="score.is_eligible = 1",
             order_sql="score.final_score DESC, cand.raw_frequency DESC, cand.candidate_key",
             limit=limit,
+            offset=offset,
         )
 
     def _list_rows(
@@ -191,6 +205,7 @@ class _CandidateScoreSummaryStore:
         parameters: tuple[object, ...] = (),
         order_sql: str = "",
         limit: int | None = None,
+        offset: int = 0,
     ) -> tuple[CandidateSummaryRow, ...]:
         sql_lines = [
             _SCORE_SUMMARY_CTES_SQL,
@@ -224,6 +239,12 @@ class _CandidateScoreSummaryStore:
         if limit is not None:
             sql_lines.append("LIMIT ?")
             query_parameters.append(limit)
+
+        if offset > 0:
+            if limit is None:
+                sql_lines.append("LIMIT -1")
+            sql_lines.append("OFFSET ?")
+            query_parameters.append(offset)
 
         rows = self.connection.execute(
             "\n".join(sql_lines),
@@ -264,6 +285,17 @@ def _row_to_candidate_summary(row: Row) -> CandidateSummaryRow:
         right_context_type_count=_optional_int(row["right_context_type_count"]),
         left_entropy=_optional_float(row["left_entropy"]),
         right_entropy=_optional_float(row["right_entropy"]),
+        punctuation_gap_occurrence_count=_optional_int(row["punctuation_gap_occurrence_count"]),
+        punctuation_gap_occurrence_ratio=_optional_float(row["punctuation_gap_occurrence_ratio"]),
+        punctuation_gap_edge_clitic_count=_optional_int(
+            row["punctuation_gap_edge_clitic_count"]
+        ),
+        punctuation_gap_edge_clitic_ratio=_optional_float(
+            row["punctuation_gap_edge_clitic_ratio"]
+        ),
+        max_component_information=_optional_float(row["max_component_information"]),
+        min_component_information=_optional_float(row["min_component_information"]),
+        high_information_token_count=_optional_int(row["high_information_token_count"]),
         covered_by_any_count=_optional_int(row["covered_by_any_count"]),
         covered_by_any_ratio=_optional_float(row["covered_by_any_ratio"]),
         independent_occurrence_count=_optional_int(row["independent_occurrence_count"]),
@@ -274,6 +306,9 @@ def _row_to_candidate_summary(row: Row) -> CandidateSummaryRow:
         dominant_parent_side=_optional_str(row["dominant_parent_side"]),
         score_version=_optional_str(row["score_version"]),
         ranking_lane=_optional_str(row["ranking_lane"]),
+        passes_support_gate=_optional_int(row["passes_support_gate"]),
+        passes_quality_gate=_optional_int(row["passes_quality_gate"]),
+        discard_family=_optional_str(row["discard_family"]),
         is_eligible=_optional_int(row["is_eligible"]),
         frequency_score=_optional_float(row["frequency_score"]),
         dispersion_score=_optional_float(row["dispersion_score"]),

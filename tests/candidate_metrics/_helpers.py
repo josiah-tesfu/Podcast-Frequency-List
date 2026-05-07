@@ -101,6 +101,13 @@ def _insert_candidate(
     right_context_type_count: int | None = None,
     left_entropy: float | None = None,
     right_entropy: float | None = None,
+    punctuation_gap_occurrence_count: int | None = None,
+    punctuation_gap_occurrence_ratio: float | None = None,
+    punctuation_gap_edge_clitic_count: int | None = None,
+    punctuation_gap_edge_clitic_ratio: float | None = None,
+    max_component_information: float | None = None,
+    min_component_information: float | None = None,
+    high_information_token_count: int | None = None,
 ) -> int:
     return int(
         connection.execute(
@@ -118,9 +125,16 @@ def _insert_candidate(
                 left_context_type_count,
                 right_context_type_count,
                 left_entropy,
-                right_entropy
+                right_entropy,
+                punctuation_gap_occurrence_count,
+                punctuation_gap_occurrence_ratio,
+                punctuation_gap_edge_clitic_count,
+                punctuation_gap_edge_clitic_ratio,
+                max_component_information,
+                min_component_information,
+                high_information_token_count
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 inventory_version,
@@ -136,6 +150,13 @@ def _insert_candidate(
                 right_context_type_count,
                 left_entropy,
                 right_entropy,
+                punctuation_gap_occurrence_count,
+                punctuation_gap_occurrence_ratio,
+                punctuation_gap_edge_clitic_count,
+                punctuation_gap_edge_clitic_ratio,
+                max_component_information,
+                min_component_information,
+                high_information_token_count,
             ),
         ).lastrowid
     )

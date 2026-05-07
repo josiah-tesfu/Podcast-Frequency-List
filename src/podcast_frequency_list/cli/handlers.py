@@ -20,8 +20,18 @@ from podcast_frequency_list.tokens import (
 )
 
 _DEFAULT_CANDIDATE_INSPECTION_KEYS = (
+    "faut que",
+    "train de",
     "en fait",
+    "ce moment",
+    "ai envie",
     "du coup",
+    "est pour",
+    "est que",
+    "de le",
+    "en a",
+    "en fait c",
+    "moi j",
     "je pense",
     "il y a",
     "tu vois",
@@ -60,6 +70,7 @@ def inspect_candidate_metrics(
     service: CandidateMetricsService,
     *,
     limit: int,
+    offset: int,
     candidate_keys: Iterable[str] | None,
 ) -> None:
     validation = service.validate()
@@ -67,7 +78,7 @@ def inspect_candidate_metrics(
         raise CandidateMetricsError("no token candidates found for inventory inspection")
 
     emit_candidate_metrics_validation(validation)
-    _emit_top_candidates(service, limit=limit)
+    _emit_top_candidates(service, limit=limit, offset=offset)
     _emit_focus_candidates(service, candidate_keys=candidate_keys)
 
 
@@ -75,15 +86,18 @@ def _emit_top_candidates(
     service: CandidateMetricsService,
     *,
     limit: int,
+    offset: int,
 ) -> None:
     for ngram_size in (1, 2, 3):
-        rows = service.list_top_candidates(ngram_size=ngram_size, limit=limit)
+        rows = service.list_top_candidates(ngram_size=ngram_size, limit=limit, offset=offset)
         emit_fields(((f"top_candidate_count_{ngram_size}gram", len(rows)),))
         emit_candidate_rows(
             rows,
             record_type=f"top_{ngram_size}gram",
             include_step4=ngram_size >= 2,
+            include_follow_up=ngram_size >= 2,
             include_step5=ngram_size <= 2,
+            rank_start=offset + 1,
         )
 
 
@@ -104,6 +118,7 @@ def _emit_focus_candidates(
         matched_rows,
         record_type="focus_candidate",
         include_step4=True,
+        include_follow_up=True,
         include_step5=True,
     )
     emit_fields((("focus_missing_count", len(missing_keys)),))
@@ -115,6 +130,7 @@ def inspect_candidate_scores(
     service: CandidateScoresService,
     *,
     limit: int,
+    offset: int,
     candidate_keys: Iterable[str] | None,
 ) -> None:
     summary = service.summarize()
@@ -122,8 +138,8 @@ def inspect_candidate_scores(
         raise CandidateScoresError("no candidate scores found for score inspection")
 
     emit_candidate_scores_result(summary)
-    _emit_top_scored_candidates(service, limit=limit)
-    _emit_global_scored_candidates(service, limit=limit)
+    _emit_top_scored_candidates(service, limit=limit, offset=offset)
+    _emit_global_scored_candidates(service, limit=limit, offset=offset)
     _emit_focus_scored_candidates(service, candidate_keys=candidate_keys)
 
 
@@ -131,16 +147,19 @@ def _emit_top_scored_candidates(
     service: CandidateScoresService,
     *,
     limit: int,
+    offset: int,
 ) -> None:
     for ngram_size in (1, 2, 3):
-        rows = service.list_top_candidates(ngram_size=ngram_size, limit=limit)
+        rows = service.list_top_candidates(ngram_size=ngram_size, limit=limit, offset=offset)
         emit_fields(((f"top_candidate_count_{ngram_size}gram", len(rows)),))
         emit_candidate_rows(
             rows,
             record_type=f"top_{ngram_size}gram",
             include_step4=ngram_size >= 2,
+            include_follow_up=ngram_size >= 2,
             include_step5=ngram_size <= 2,
             include_step6=True,
+            rank_start=offset + 1,
         )
 
 
@@ -148,15 +167,18 @@ def _emit_global_scored_candidates(
     service: CandidateScoresService,
     *,
     limit: int,
+    offset: int,
 ) -> None:
-    rows = service.list_global_candidates(limit=limit)
+    rows = service.list_global_candidates(limit=limit, offset=offset)
     emit_fields((("top_candidate_count_global", len(rows)),))
     emit_candidate_rows(
         rows,
         record_type="top_global",
         include_step4=True,
+        include_follow_up=True,
         include_step5=True,
         include_step6=True,
+        rank_start=offset + 1,
     )
 
 
@@ -177,6 +199,7 @@ def _emit_focus_scored_candidates(
         matched_rows,
         record_type="focus_candidate",
         include_step4=True,
+        include_follow_up=True,
         include_step5=True,
         include_step6=True,
     )

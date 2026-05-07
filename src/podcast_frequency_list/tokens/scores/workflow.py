@@ -38,6 +38,8 @@ class _CandidateScoresWorkflow:
             """
             SELECT
                 COUNT(*) AS stored_candidates,
+                COALESCE(SUM(passes_support_gate), 0) AS support_pass_candidates,
+                COALESCE(SUM(passes_quality_gate), 0) AS quality_pass_candidates,
                 COALESCE(SUM(is_eligible), 0) AS eligible_candidates,
                 COALESCE(
                     SUM(
@@ -77,6 +79,8 @@ class _CandidateScoresWorkflow:
             score_version=self.score_version,
             selected_candidates=selected_candidates,
             stored_candidates=int(row["stored_candidates"]),
+            support_pass_candidates=int(row["support_pass_candidates"]),
+            quality_pass_candidates=int(row["quality_pass_candidates"]),
             eligible_candidates=int(row["eligible_candidates"]),
             eligible_1gram_candidates=int(row["eligible_1gram_candidates"]),
             eligible_2gram_candidates=int(row["eligible_2gram_candidates"]),
@@ -109,6 +113,9 @@ class _CandidateScoresWorkflow:
                 score_version,
                 candidate_id,
                 ranking_lane,
+                passes_support_gate,
+                passes_quality_gate,
+                discard_family,
                 is_eligible,
                 frequency_score,
                 dispersion_score,
@@ -118,7 +125,7 @@ class _CandidateScoresWorkflow:
                 final_score,
                 lane_rank
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -126,6 +133,9 @@ class _CandidateScoresWorkflow:
                     row.score_version,
                     row.candidate_id,
                     row.ranking_lane,
+                    row.passes_support_gate,
+                    row.passes_quality_gate,
+                    row.discard_family,
                     row.is_eligible,
                     row.frequency_score,
                     row.dispersion_score,
@@ -180,6 +190,9 @@ def _load_candidate_inputs(
             cand.npmi,
             cand.left_entropy,
             cand.right_entropy,
+            cand.punctuation_gap_occurrence_ratio,
+            cand.punctuation_gap_edge_clitic_ratio,
+            cand.max_component_information,
             CASE
                 WHEN dominant_parent.dominant_parent_shared_count IS NOT NULL
                 AND cand.raw_frequency > 0
@@ -216,9 +229,16 @@ def _load_candidate_inputs(
                 npmi=_optional_float(row["npmi"]),
                 left_entropy=_optional_float(row["left_entropy"]),
                 right_entropy=_optional_float(row["right_entropy"]),
+                punctuation_gap_occurrence_ratio=_optional_float(
+                    row["punctuation_gap_occurrence_ratio"]
+                ),
+                punctuation_gap_edge_clitic_ratio=_optional_float(
+                    row["punctuation_gap_edge_clitic_ratio"]
+                ),
+                max_component_information=_optional_float(row["max_component_information"]),
                 dominant_parent_share=_optional_float(row["dominant_parent_share"]),
                 ranking_lane=lane_spec.ranking_lane,
-                is_eligible=(
+                passes_support_gate=(
                     raw_frequency >= lane_spec.min_raw_frequency
                     and episode_dispersion >= lane_spec.min_episode_dispersion
                 ),

@@ -44,6 +44,13 @@ def test_candidate_metrics_service_lists_top_candidates_by_ngram(tmp_path) -> No
             right_context_type_count=3,
             left_entropy=0.4,
             right_entropy=0.8,
+            punctuation_gap_occurrence_count=1,
+            punctuation_gap_occurrence_ratio=0.1,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=2.4,
+            min_component_information=0.7,
+            high_information_token_count=1,
         )
         _insert_candidate(
             connection,
@@ -92,6 +99,13 @@ def test_candidate_metrics_service_lists_top_candidates_by_ngram(tmp_path) -> No
     assert rows[0].right_context_type_count == 3
     assert rows[0].left_entropy == 0.4
     assert rows[0].right_entropy == 0.8
+    assert rows[0].punctuation_gap_occurrence_count == 1
+    assert rows[0].punctuation_gap_occurrence_ratio == pytest.approx(0.1)
+    assert rows[0].punctuation_gap_edge_clitic_count == 0
+    assert rows[0].punctuation_gap_edge_clitic_ratio == pytest.approx(0.0)
+    assert rows[0].max_component_information == pytest.approx(2.4)
+    assert rows[0].min_component_information == pytest.approx(0.7)
+    assert rows[0].high_information_token_count == 1
     assert rows[0].covered_by_any_count == 0
     assert rows[0].covered_by_any_ratio == pytest.approx(0.0)
     assert rows[0].independent_occurrence_count == 10
@@ -133,6 +147,35 @@ def test_candidate_metrics_service_summary_validates_arguments(tmp_path) -> None
 
     with pytest.raises(CandidateMetricsError, match="limit"):
         service.list_top_candidates(ngram_size=1, limit=0)
+
+    with pytest.raises(CandidateMetricsError, match="offset"):
+        service.list_top_candidates(ngram_size=1, offset=-1)
+
+
+def test_candidate_metrics_service_lists_top_candidates_with_offset(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        for candidate_key, raw_frequency in (("alpha", 30), ("beta", 20), ("gamma", 10)):
+            _insert_candidate(
+                connection,
+                candidate_key=candidate_key,
+                display_text=candidate_key,
+                ngram_size=2,
+                raw_frequency=raw_frequency,
+                episode_dispersion=1,
+                show_dispersion=1,
+            )
+        connection.commit()
+
+    rows = CandidateMetricsService(db_path=db_path).list_top_candidates(
+        ngram_size=2,
+        limit=1,
+        offset=1,
+    )
+
+    assert [row.candidate_key for row in rows] == ["beta"]
 
 
 def test_candidate_metrics_service_validate_detects_stale_metrics(tmp_path) -> None:
@@ -394,6 +437,13 @@ def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tm
             right_context_type_count=5,
             left_entropy=0.25,
             right_entropy=1.4,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=2.1,
+            min_component_information=0.9,
+            high_information_token_count=1,
         )
         connection.commit()
 
@@ -410,6 +460,13 @@ def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tm
     assert rows[0].right_context_type_count == 5
     assert rows[0].left_entropy == 0.25
     assert rows[0].right_entropy == 1.4
+    assert rows[0].punctuation_gap_occurrence_count == 0
+    assert rows[0].punctuation_gap_occurrence_ratio == pytest.approx(0.0)
+    assert rows[0].punctuation_gap_edge_clitic_count == 0
+    assert rows[0].punctuation_gap_edge_clitic_ratio == pytest.approx(0.0)
+    assert rows[0].max_component_information == pytest.approx(2.1)
+    assert rows[0].min_component_information == pytest.approx(0.9)
+    assert rows[0].high_information_token_count == 1
     assert rows[0].covered_by_any_count is None
     assert rows[0].covered_by_any_ratio is None
     assert rows[0].independent_occurrence_count is None

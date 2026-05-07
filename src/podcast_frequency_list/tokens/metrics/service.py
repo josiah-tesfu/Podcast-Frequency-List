@@ -22,6 +22,7 @@ class CandidateMetricsError(RuntimeError):
 MIN_NGRAM_SIZE = 1
 MAX_NGRAM_SIZE = 4
 DEFAULT_SUMMARY_LIMIT = 20
+DEFAULT_SUMMARY_OFFSET = 0
 
 
 class CandidateMetricsService:
@@ -45,16 +46,18 @@ class CandidateMetricsService:
         *,
         ngram_size: int,
         limit: int = DEFAULT_SUMMARY_LIMIT,
+        offset: int = DEFAULT_SUMMARY_OFFSET,
         inventory_version: str = INVENTORY_VERSION,
     ) -> tuple[CandidateSummaryRow, ...]:
         _validate_ngram_size(ngram_size)
         _validate_limit(limit)
+        _validate_offset(offset)
 
         with connect(self.db_path) as connection:
             return _CandidateSummaryStore(
                 connection=connection,
                 inventory_version=inventory_version,
-            ).list_top_candidates(ngram_size=ngram_size, limit=limit)
+            ).list_top_candidates(ngram_size=ngram_size, limit=limit, offset=offset)
 
     def validate(
         self,
@@ -94,3 +97,8 @@ def _validate_ngram_size(ngram_size: int) -> None:
 def _validate_limit(limit: int) -> None:
     if limit < 1:
         raise CandidateMetricsError("limit must be positive")
+
+
+def _validate_offset(offset: int) -> None:
+    if offset < 0:
+        raise CandidateMetricsError("offset must be non-negative")

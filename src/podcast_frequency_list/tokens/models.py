@@ -84,6 +84,8 @@ class CandidateScoresResult:
     score_version: str
     selected_candidates: int
     stored_candidates: int
+    support_pass_candidates: int
+    quality_pass_candidates: int
     eligible_candidates: int
     eligible_1gram_candidates: int
     eligible_2gram_candidates: int
@@ -104,6 +106,13 @@ class CandidateSummaryRow:
     right_context_type_count: int | None = None
     left_entropy: float | None = None
     right_entropy: float | None = None
+    punctuation_gap_occurrence_count: int | None = None
+    punctuation_gap_occurrence_ratio: float | None = None
+    punctuation_gap_edge_clitic_count: int | None = None
+    punctuation_gap_edge_clitic_ratio: float | None = None
+    max_component_information: float | None = None
+    min_component_information: float | None = None
+    high_information_token_count: int | None = None
     covered_by_any_count: int | None = None
     covered_by_any_ratio: float | None = None
     independent_occurrence_count: int | None = None
@@ -114,6 +123,9 @@ class CandidateSummaryRow:
     dominant_parent_side: str | None = None
     score_version: str | None = None
     ranking_lane: str | None = None
+    passes_support_gate: int | None = None
+    passes_quality_gate: int | None = None
+    discard_family: str | None = None
     is_eligible: int | None = None
     frequency_score: float | None = None
     dispersion_score: float | None = None

@@ -2558,3 +2558,418 @@ Reason:
   kept the read surface reviewable without imposing extra composition policy
 
 Next step: Step 7, Example Selection.
+
+## Follow-Up Adjustment Plan: Quality Gate Before Example Selection
+
+If the Step 6 ranked surface still contains too much low-identity residue, run
+this adjustment plan before Step 7.
+
+Purpose:
+
+- keep support gating and ranking, but stop obviously weak multiword rows from
+  surviving forever just because they cleared the support floor
+- preserve useful glue, function-heavy chunks, and opaque grammar chunks that
+  really are worth learning
+- fix structural false positives that are not really spoken units at all
+
+Current pilot findings:
+
+- Step 4 and Step 5 already detect many weak rows well; they are often low on
+  association, weak on one boundary, and heavily covered by a direct parent
+- the current Step 6 behavior mainly penalizes those rows rather than
+  discarding them, so they eventually appear later in the ranked deck
+- the current ranked tail therefore contains a large amount of frequent residue
+  such as `est pour`, `est que`, `en a`, and similar fragments
+- some weak-looking rows are still genuinely useful chunks, so a simple
+  high-redundancy discard rule would be too crude
+- there is also a separate structural leak earlier in the pipeline: span
+  generation currently allows punctuation-bridging candidates like `en fait, c`
+  and `moi, j`
+
+Pilot snapshot notes:
+
+- the current eligible pool contains comma-bearing multiword rows such as
+  `en fait, c`, `Ouais, c`, `moi, j`, `toi, t`, and `du coup, c`
+- those rows are not just low-ranked residue; some currently rank fairly high,
+  which means a quality fix should not be treated as Step 8-only cleanup
+
+Recommended stance:
+
+- treat this as a deterministic follow-up plan, not a manual curation pass
+- split the work into a structural cleanup track and a post-Step-5 quality-gate
+  track
+- keep the new heuristic inspectable and factual before turning it into a hard
+  discard rule
+- do not jump straight to blacklist hooks, POS tagging, or semantic classifiers
+- do not discard purely by low final score; discard by interpretable quality
+  conditions
+- keep support gating separate from quality gating
+- keep `1`-gram policy separate from `2`/`3`-gram policy in the first pass,
+  because the current problem is mainly multiword residue
+
+Main new heuristic:
+
+- `unit_identity`
+
+`unit_identity` should answer a different question from Step 4 and Step 5:
+
+```text
+Even if this candidate is frequent enough to score, does it still look like a
+memorable, learnable unit rather than a loose fragment or clause-boundary shard?
+```
+
+`unit_identity` should start with two factual components.
+
+### Unit Identity Component A: Surface Integrity
+
+Measure whether the candidate tends to appear as one clean local unit in its
+actual sentence surfaces.
+
+Recommended factual metrics:
+
+- `punctuation_gap_occurrence_count`
+- `punctuation_gap_occurrence_ratio`
+- `punctuation_gap_edge_clitic_count`
+- `punctuation_gap_edge_clitic_ratio`
+
+Recommended semantics:
+
+- compute these from occurrence surfaces, not from one stored `display_text`
+- count an occurrence as a punctuation-gap occurrence when the candidate spans
+  over interior clause punctuation such as commas
+- count an occurrence as an edge-clitic punctuation-gap occurrence when the
+  candidate crosses such punctuation and one edge token is a stranded clitic
+  fragment such as `c`, `j`, `t`, `l`, `d`, `m`, `n`, or `s`
+- treat edge-clitic punctuation-bridging rows as structural red flags, because
+  they often reflect clause-junction artifacts rather than stable chunks
+
+Why this matters:
+
+- Step 4 association and boundary metrics are computed over token sequences and
+  can still look decent for some comma-bridging discourse patterns
+- the ranked output showed that punctuation-bridging artifacts are one real
+  source of false positives that should be addressed explicitly
+
+### Unit Identity Component B: Lexical Anchor
+
+Measure whether the candidate contains at least one strong lexical anchor rather
+than being composed only of extremely common scaffold material.
+
+Recommended factual metrics:
+
+- `max_component_information`
+- `min_component_information`
+- `high_information_token_count`
+
+Recommended semantics:
+
+- derive component information from stored unigram frequencies
+- use an information-content style signal such as `-log(p(token))`
+- let `max_component_information` act as the main anchor signal
+- keep this factual and language-light: no POS tagging, no lemma lookup, no
+  hand-built stopword list
+
+Why this matters:
+
+- chunks such as `train de`, `faut que`, `ai envie`, and `ce moment` can look
+  weaker on one Step 4 or Step 5 dimension but still have a clear lexical
+  anchor that makes them card-worthy
+- weak residues such as `est pour`, `est que`, `en a`, and `de le` often lack
+  both strong cohesion and a strong anchor
+
+### Existing Keep Reasons That Still Matter
+
+The new heuristic should not replace Step 4 and Step 5. It should work beside
+them.
+
+Existing keep reasons:
+
+- strong association
+- usable weaker-side boundary independence
+- low direct-parent domination
+- clear lexical anchor
+- clean surface integrity
+
+The intended policy is not:
+
+```text
+high redundancy -> discard
+```
+
+The intended policy is:
+
+```text
+no strong keep reason + multiple weak signals -> discard
+```
+
+## Proposed Quality-Gate Model
+
+Recommended ordering:
+
+```text
+support gate -> quality gate -> ranking -> example selection
+```
+
+Recommended semantics:
+
+- Step 6B support floors continue to cut the sparse tail
+- a new quality gate then removes eligible-but-low-value multiword residue
+- final Step 6 ranking should run only over rows that pass both gates
+- support-gate state and quality-gate state should both remain inspectable
+
+Recommended storage direction:
+
+- keep the new factual `unit_identity` metrics on `token_candidates`, alongside
+  other stored candidate facts
+- store quality-gate pass/fail state on `candidate_scores`
+- keep one final `is_eligible` field if desired, but also expose separate
+  support-pass and quality-pass status so discard reasons remain auditable
+
+Recommended discard shape:
+
+- `1`-grams:
+  - leave unchanged in the first pass unless clear evidence appears that the
+    same issue exists there
+- `2`/`3`-grams:
+  - hard-drop structural punctuation-bridging artifacts
+  - otherwise require at least one strong keep reason before the row is allowed
+    into the final ranked pool
+  - if no keep reason is present, discard rather than merely pushing the row
+    downward
+
+Recommended first discard families:
+
+- punctuation-gap edge-clitic artifacts such as `en fait, c`, `moi, j`, and
+  `Ouais, c`
+- low-association, weak-boundary, high-redundancy residues such as `est pour`,
+  `est que`, `est des`, `en a`, and similar rows
+
+Important caution:
+
+- do not discard useful grammar chunks just because they are function-heavy
+- do not discard purely because a row appears inside a larger parent
+- do not use `covered_by_any` as a discard trigger
+- do not use one arbitrary `display_text` value as the quality signal when the
+  candidate has many occurrences
+
+## Implementation Plan
+
+This is moderately complicated and should not be done in one pass.
+
+### Follow-Up A: Structural Span Cleanup Audit
+
+Goal:
+
+- decide which punctuation-bridging spans are structural junk and should stop
+  being generated at all
+
+Scope:
+
+- inspect how `generate_sentence_spans(...)` currently treats token contiguity
+  across punctuation gaps
+- identify which punctuation classes should block span generation in the current
+  French profile
+- start with the clearest case: comma-bridging spans whose edge token is a
+  stranded clitic fragment
+
+Reason:
+
+- this is not merely a ranking issue; some rows are artifacts of span
+  construction itself
+- fixing the earliest clean structural error reduces downstream complexity
+
+Validation:
+
+- read-only pilot query over punctuation-bearing candidates
+- before/after count of comma-bridging eligible rows
+- targeted span tests over cases like `en fait, c`, `Ouais, je`, `moi, j`,
+  while preserving acceptable cases that should stay contiguous
+
+Exit criteria:
+
+- obviously bad punctuation-bridging artifacts are explicitly defined
+- the design either blocks them in span generation or marks them for explicit
+  downstream rejection
+
+### Follow-Up B: Unit Identity Metric Contract
+
+Goal:
+
+- define the new factual metrics before adding any discard policy
+
+Scope:
+
+- add `surface_integrity` metrics
+- add `lexical_anchor` metrics
+- define null semantics
+- decide whether all metrics live on `token_candidates` or whether one small
+  helper table is truly needed
+
+Recommended first metrics:
+
+- `punctuation_gap_occurrence_count`
+- `punctuation_gap_occurrence_ratio`
+- `punctuation_gap_edge_clitic_count`
+- `punctuation_gap_edge_clitic_ratio`
+- `max_component_information`
+- `min_component_information`
+- `high_information_token_count`
+
+Validation:
+
+- fresh schema and migration tests if storage changes
+- deterministic refresh test
+- focused inspection over strong chunks, weak residues, and punctuation cases
+
+Sanity checks:
+
+- `du coup`, `en fait`, `il y a`, `je pense`, and `j ai envie` keep plausible
+  unit-identity values
+- `est pour`, `est que`, `en a`, and `de le` look weak on at least one new
+  dimension
+- punctuation-bridging artifacts score badly on `surface_integrity`
+
+Exit criteria:
+
+- the new heuristic is stored as factual evidence, not yet as a discard rule
+
+### Follow-Up C: Inspection Surface And Threshold Discovery
+
+Goal:
+
+- make the new metrics reviewable before deciding exact discard thresholds
+
+Scope:
+
+- extend candidate inspection commands and summaries
+- add focused comparison views for:
+  - strong chunks
+  - useful grammar chunks
+  - obvious residue
+  - punctuation-bridging artifacts
+
+Recommended threshold-discovery method:
+
+- review top, middle, and tail slices separately
+- inspect borderline useful rows such as `train de`, `faut que`, `ai envie`,
+  and `ce moment`
+- inspect obvious weak rows such as `est pour`, `est que`, `de le`, `en a`,
+  and punctuation-bridging shards
+
+Reason:
+
+- the discard thresholds should be learned from live pilot behavior, not guessed
+  from one abstract formula
+
+Validation:
+
+- DB values match inspection output
+- repeated refreshes leave threshold-audit slices stable
+
+Exit criteria:
+
+- a small set of threshold candidates exists for the quality gate
+- known false-positive and false-negative examples are documented
+
+### Follow-Up D: Quality Gate In Candidate Scores
+
+Goal:
+
+- convert the inspected heuristic into explicit discard logic
+
+Scope:
+
+- add support-pass vs quality-pass semantics to score refresh
+- run final ranking only on rows that pass both
+- keep dropped rows queryable and auditable
+- record discard reason or discard family if that stays low-surface enough
+
+Recommended policy shape:
+
+- hard structural rejection for punctuation-gap edge-clitic artifacts
+- soft factual rule for the remaining multiword rows:
+  - keep if at least one strong keep reason is present
+  - discard if no strong keep reason is present and multiple weak signals align
+
+Recommended first strong keep reasons:
+
+- association above a tuned threshold
+- weaker-side boundary above a tuned threshold
+- lexical-anchor signal above a tuned threshold
+- low structural-fragment signal
+
+Recommended first weak-signal cluster:
+
+- low association
+- weak weaker-side boundary
+- high direct-parent domination
+- no lexical anchor
+- poor surface integrity
+
+Validation:
+
+- deterministic keep/drop counts on the pilot snapshot
+- dropped rows no longer appear in ranked lane/global views
+- useful borderline chunks remain in the final eligible pool
+
+Sanity checks:
+
+- `train de`, `faut que`, `ai envie`, and `ce moment` are not lost casually
+- `est pour`, `est que`, `en a`, `de le`, and punctuation-bridging shards do
+  not survive just because they were frequent enough
+
+Exit criteria:
+
+- the ranked pool is smaller and cleaner
+- discard behavior is explicit rather than hidden inside score weights
+
+Status:
+
+- implemented in `pilot-v2`
+- next step: Follow-Up E
+
+### Follow-Up E: Pilot Validation And Threshold Revision
+
+Goal:
+
+- verify that the new gate improves card-worthiness without over-pruning
+
+Validation:
+
+- rerun metrics and scores twice to confirm deterministic results
+- inspect top `200`, middle `200`, and tail slices before and after the change
+- compare kept vs dropped rows for:
+  - strong spoken chunks
+  - useful grammar chunks
+  - punctuation artifacts
+  - obvious residue
+- confirm that score ordering still looks sensible inside the reduced pool
+
+Sanity checks:
+
+- top ranked rows remain strong
+- the late ranked tail is materially cleaner
+- punctuation artifacts are largely gone
+- higher-value lower-frequency rows are no longer drowned out by large amounts
+  of weak residue
+
+Exit criteria:
+
+- the ranked surface is strong enough to proceed to Step 7
+- if the ranked surface is still too noisy, revise thresholds before example
+  selection rather than compensating later with example heuristics
+
+Status:
+
+- validated in `pilot-v2`
+- no threshold revision needed after the pilot pass
+
+Pilot validation notes:
+
+- reruns were deterministic
+- support gate held at `804` and final eligible pool settled at `624`
+- kept borderline useful chunks included `train de`, `faut que`, `ai envie`,
+  and `ce moment`
+- dropped weak residue included `est pour`, `est que`, `de le`, `en a`,
+  `moi, j`, and `en fait, c`
+- top ranked rows stayed strong enough to proceed to Step 7

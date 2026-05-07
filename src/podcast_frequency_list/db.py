@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "14"
+SCHEMA_VERSION = "16"
 
 
 def get_schema_path() -> Path:
@@ -38,6 +38,7 @@ def bootstrap_database(db_path: Path | None = None) -> Path:
         connection.executescript(load_schema())
         migrate_token_candidate_schema(connection)
         migrate_candidate_containment_schema(connection)
+        migrate_candidate_scores_schema(connection)
         connection.execute(
             """
             INSERT INTO app_meta (key, value)
@@ -172,6 +173,89 @@ _TOKEN_CANDIDATE_MIGRATIONS = (
         CHECK (right_entropy IS NULL OR right_entropy >= 0)
         """,
     ),
+    (
+        "punctuation_gap_occurrence_count",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN punctuation_gap_occurrence_count INTEGER
+        CHECK (
+            punctuation_gap_occurrence_count IS NULL
+            OR punctuation_gap_occurrence_count >= 0
+        )
+        """,
+    ),
+    (
+        "punctuation_gap_occurrence_ratio",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN punctuation_gap_occurrence_ratio REAL
+        CHECK (
+            punctuation_gap_occurrence_ratio IS NULL
+            OR (
+                punctuation_gap_occurrence_ratio >= 0
+                AND punctuation_gap_occurrence_ratio <= 1
+            )
+        )
+        """,
+    ),
+    (
+        "punctuation_gap_edge_clitic_count",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN punctuation_gap_edge_clitic_count INTEGER
+        CHECK (
+            punctuation_gap_edge_clitic_count IS NULL
+            OR punctuation_gap_edge_clitic_count >= 0
+        )
+        """,
+    ),
+    (
+        "punctuation_gap_edge_clitic_ratio",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN punctuation_gap_edge_clitic_ratio REAL
+        CHECK (
+            punctuation_gap_edge_clitic_ratio IS NULL
+            OR (
+                punctuation_gap_edge_clitic_ratio >= 0
+                AND punctuation_gap_edge_clitic_ratio <= 1
+            )
+        )
+        """,
+    ),
+    (
+        "max_component_information",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN max_component_information REAL
+        CHECK (
+            max_component_information IS NULL
+            OR max_component_information >= 0
+        )
+        """,
+    ),
+    (
+        "min_component_information",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN min_component_information REAL
+        CHECK (
+            min_component_information IS NULL
+            OR min_component_information >= 0
+        )
+        """,
+    ),
+    (
+        "high_information_token_count",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN high_information_token_count INTEGER
+        CHECK (
+            high_information_token_count IS NULL
+            OR high_information_token_count >= 0
+        )
+        """,
+    ),
 )
 
 
@@ -259,6 +343,122 @@ def migrate_candidate_containment_schema(connection: sqlite3.Connection) -> None
         """
         CREATE INDEX IF NOT EXISTS idx_candidate_containment_larger
             ON candidate_containment (inventory_version, larger_candidate_id)
+        """
+    )
+
+
+def migrate_candidate_scores_schema(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table'
+        AND name = 'candidate_scores'
+        """
+    ).fetchone()
+    if row is None:
+        return
+
+    table_sql = row["sql"] or ""
+    columns = {
+        row["name"]
+        for row in connection.execute("PRAGMA table_info(candidate_scores)").fetchall()
+    }
+    if {
+        "passes_support_gate",
+        "passes_quality_gate",
+        "discard_family",
+    } <= columns and "discard_family IS NOT NULL" in table_sql:
+        return
+
+    connection.execute("ALTER TABLE candidate_scores RENAME TO candidate_scores_old")
+    connection.execute(
+        """
+        CREATE TABLE candidate_scores (
+            inventory_version TEXT NOT NULL,
+            score_version TEXT NOT NULL,
+            candidate_id INTEGER NOT NULL,
+            ranking_lane TEXT NOT NULL CHECK (ranking_lane IN ('1gram', '2gram', '3gram')),
+            passes_support_gate INTEGER NOT NULL CHECK (passes_support_gate IN (0, 1)),
+            passes_quality_gate INTEGER NOT NULL CHECK (passes_quality_gate IN (0, 1)),
+            discard_family TEXT
+                CHECK (
+                    discard_family IS NULL
+                    OR discard_family IN ('support_floor', 'edge_clitic_gap', 'weak_multiword')
+                ),
+            is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),
+            frequency_score REAL,
+            dispersion_score REAL,
+            association_score REAL,
+            boundary_score REAL,
+            redundancy_penalty REAL,
+            final_score REAL,
+            lane_rank INTEGER CHECK (lane_rank IS NULL OR lane_rank > 0),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (inventory_version, score_version, candidate_id),
+            CHECK (is_eligible = 1 OR lane_rank IS NULL),
+            CHECK (is_eligible = 1 OR final_score IS NULL),
+            CHECK (is_eligible = 0 OR discard_family IS NULL),
+            CHECK (is_eligible = 1 OR discard_family IS NOT NULL),
+            FOREIGN KEY (candidate_id, inventory_version)
+                REFERENCES token_candidates(candidate_id, inventory_version)
+                ON DELETE CASCADE
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO candidate_scores (
+            inventory_version,
+            score_version,
+            candidate_id,
+            ranking_lane,
+            passes_support_gate,
+            passes_quality_gate,
+            discard_family,
+            is_eligible,
+            frequency_score,
+            dispersion_score,
+            association_score,
+            boundary_score,
+            redundancy_penalty,
+            final_score,
+            lane_rank,
+            created_at
+        )
+        SELECT
+            inventory_version,
+            score_version,
+            candidate_id,
+            ranking_lane,
+            is_eligible,
+            is_eligible,
+            CASE
+                WHEN is_eligible = 1 THEN NULL
+                ELSE 'support_floor'
+            END,
+            is_eligible,
+            frequency_score,
+            dispersion_score,
+            association_score,
+            boundary_score,
+            redundancy_penalty,
+            final_score,
+            lane_rank,
+            created_at
+        FROM candidate_scores_old
+        """
+    )
+    connection.execute("DROP TABLE candidate_scores_old")
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_candidate_scores_lane_rank
+            ON candidate_scores (
+                inventory_version,
+                score_version,
+                ranking_lane,
+                lane_rank
+            )
         """
     )
 

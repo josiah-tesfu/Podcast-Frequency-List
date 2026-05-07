@@ -7,6 +7,7 @@ from podcast_frequency_list.tokens.models import CandidateSpan, SentenceToken
 DEFAULT_MAX_NGRAM_SIZE = 3
 STANDALONE_CLITIC_JUNK = frozenset({"c", "d", "j", "l", "m", "n", "s", "t"})
 WORDLIKE_TOKEN_TYPES = frozenset({"word", "number"})
+CLAUSE_GAP_PUNCTUATION = ","
 
 
 class SpanGenerationError(ValueError):
@@ -35,7 +36,7 @@ def generate_sentence_spans(
                 break
 
             span_tokens = ordered_tokens[start_position:end_position]
-            if not _is_valid_span(span_tokens):
+            if not _is_valid_span(span_tokens, sentence_text=sentence_text):
                 continue
 
             char_start = span_tokens[0].char_start
@@ -97,7 +98,11 @@ def _validate_and_order_tokens(
     return ordered_tokens
 
 
-def _is_valid_span(tokens: Sequence[SentenceToken]) -> bool:
+def _is_valid_span(
+    tokens: Sequence[SentenceToken],
+    *,
+    sentence_text: str,
+) -> bool:
     if not tokens:
         return False
 
@@ -110,4 +115,28 @@ def _is_valid_span(tokens: Sequence[SentenceToken]) -> bool:
     if len(tokens) == 1 and tokens[0].token_key in STANDALONE_CLITIC_JUNK:
         return False
 
+    if _crosses_clause_gap_with_adjacent_clitic(tokens, sentence_text=sentence_text):
+        return False
+
     return True
+
+
+def _crosses_clause_gap_with_adjacent_clitic(
+    tokens: Sequence[SentenceToken],
+    *,
+    sentence_text: str,
+) -> bool:
+    if len(tokens) < 2:
+        return False
+
+    for left_token, right_token in zip(tokens, tokens[1:], strict=False):
+        gap_text = sentence_text[left_token.char_end : right_token.char_start]
+        if CLAUSE_GAP_PUNCTUATION not in gap_text:
+            continue
+        if (
+            left_token.token_key in STANDALONE_CLITIC_JUNK
+            or right_token.token_key in STANDALONE_CLITIC_JUNK
+        ):
+            return True
+
+    return False

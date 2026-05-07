@@ -28,6 +28,7 @@ def refresh_candidate_scores() -> None:
 
 def inspect_candidate_scores(
     limit: int = typer.Option(10, "--limit", min=1),
+    offset: int = typer.Option(0, "--offset", min=0),
     candidate_key: list[str] | None = _CANDIDATE_KEY_OPTION,
 ) -> None:
     run_bootstrapped_service_command(
@@ -35,6 +36,7 @@ def inspect_candidate_scores(
         partial(
             _inspect_candidate_scores_service,
             limit=limit,
+            offset=offset,
             candidate_keys=candidate_key,
         ),
         CandidateScoresError,
@@ -45,11 +47,13 @@ def _inspect_candidate_scores_service(
     service: object,
     *,
     limit: int,
+    offset: int,
     candidate_keys: list[str] | None,
 ) -> None:
     handlers.inspect_candidate_scores(
         service,
         limit=limit,
+        offset=offset,
         candidate_keys=candidate_keys,
     )
 

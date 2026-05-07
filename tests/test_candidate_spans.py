@@ -51,6 +51,25 @@ def test_generate_sentence_spans_filters_standalone_clitics_but_keeps_chunks() -
     assert "qu il" in keys
 
 
+def test_generate_sentence_spans_filters_comma_gap_clitic_artifacts() -> None:
+    spans = _spans_for("En fait, c'est bon.")
+    keys = {span.candidate_key for span in spans}
+
+    assert "en fait" in keys
+    assert "c est" in keys
+    assert "en fait c" not in keys
+    assert "fait c" not in keys
+    assert "fait c est" not in keys
+
+
+def test_generate_sentence_spans_keeps_comma_gap_without_adjacent_clitic() -> None:
+    spans = _spans_for("Non, mais oui.")
+    keys = {span.candidate_key for span in spans}
+
+    assert "non mais" in keys
+    assert "non mais oui" in keys
+
+
 def test_generate_sentence_spans_filters_numeric_only_spans() -> None:
     spans = _spans_for("22 fois et 1-0.")
     keys = {span.candidate_key for span in spans}

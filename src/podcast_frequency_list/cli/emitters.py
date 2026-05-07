@@ -106,10 +106,12 @@ def emit_candidate_rows(
     *,
     record_type: str,
     include_step4: bool = False,
+    include_follow_up: bool = False,
     include_step5: bool = False,
     include_step6: bool = False,
+    rank_start: int = 1,
 ) -> None:
-    for rank, row in enumerate(rows, start=1):
+    for rank, row in enumerate(rows, start=rank_start):
         fields: list[tuple[str, object]] = [
             ("record", record_type),
             ("rank", rank),
@@ -135,6 +137,39 @@ def emit_candidate_rows(
                     ),
                     ("left_entropy", _optional_metric_value(row.left_entropy)),
                     ("right_entropy", _optional_metric_value(row.right_entropy)),
+                ]
+            )
+        if include_follow_up:
+            fields.extend(
+                [
+                    (
+                        "punctuation_gap_occurrence_count",
+                        _optional_metric_value(row.punctuation_gap_occurrence_count),
+                    ),
+                    (
+                        "punctuation_gap_occurrence_ratio",
+                        _optional_metric_value(row.punctuation_gap_occurrence_ratio),
+                    ),
+                    (
+                        "punctuation_gap_edge_clitic_count",
+                        _optional_metric_value(row.punctuation_gap_edge_clitic_count),
+                    ),
+                    (
+                        "punctuation_gap_edge_clitic_ratio",
+                        _optional_metric_value(row.punctuation_gap_edge_clitic_ratio),
+                    ),
+                    (
+                        "max_component_information",
+                        _optional_metric_value(row.max_component_information),
+                    ),
+                    (
+                        "min_component_information",
+                        _optional_metric_value(row.min_component_information),
+                    ),
+                    (
+                        "high_information_token_count",
+                        _optional_metric_value(row.high_information_token_count),
+                    ),
                 ]
             )
         if include_step5:
@@ -179,6 +214,9 @@ def emit_candidate_rows(
                 [
                     ("score_version", _optional_metric_value(row.score_version)),
                     ("ranking_lane", _optional_metric_value(row.ranking_lane)),
+                    ("passes_support_gate", _optional_metric_value(row.passes_support_gate)),
+                    ("passes_quality_gate", _optional_metric_value(row.passes_quality_gate)),
+                    ("discard_family", _optional_metric_value(row.discard_family)),
                     ("is_eligible", _optional_metric_value(row.is_eligible)),
                     ("frequency_score", _optional_metric_value(row.frequency_score)),
                     ("dispersion_score", _optional_metric_value(row.dispersion_score)),

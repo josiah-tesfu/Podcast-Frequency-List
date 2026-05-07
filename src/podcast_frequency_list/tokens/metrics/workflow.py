@@ -11,6 +11,7 @@ from .association import _AssociationStore
 from .boundary import _BoundaryStore
 from .containment import _ContainmentStore
 from .display import _DisplayStore
+from .identity import _UnitIdentityStore
 from .store import _MetricsStore
 
 _METRIC_RESULT_FIELDS = (
@@ -37,6 +38,10 @@ class _CandidateMetricsWorkflow:
             inventory_version=inventory_version,
         )
         self.containment_store = _ContainmentStore(
+            connection=connection,
+            inventory_version=inventory_version,
+        )
+        self.identity_store = _UnitIdentityStore(
             connection=connection,
             inventory_version=inventory_version,
         )
@@ -73,6 +78,7 @@ class _CandidateMetricsWorkflow:
         self.association_store.refresh()
         self.boundary_store.refresh()
         self.containment_store.refresh()
+        self.identity_store.refresh()
         display_text_updates = self.display_store.refresh()
         summary = self.metric_store.load_summary()
 

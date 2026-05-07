@@ -216,6 +216,41 @@ CREATE TABLE IF NOT EXISTS token_candidates (
         CHECK (left_entropy IS NULL OR left_entropy >= 0),
     right_entropy REAL
         CHECK (right_entropy IS NULL OR right_entropy >= 0),
+    punctuation_gap_occurrence_count INTEGER
+        CHECK (
+            punctuation_gap_occurrence_count IS NULL
+            OR punctuation_gap_occurrence_count >= 0
+        ),
+    punctuation_gap_occurrence_ratio REAL
+        CHECK (
+            punctuation_gap_occurrence_ratio IS NULL
+            OR (
+                punctuation_gap_occurrence_ratio >= 0
+                AND punctuation_gap_occurrence_ratio <= 1
+            )
+        ),
+    punctuation_gap_edge_clitic_count INTEGER
+        CHECK (
+            punctuation_gap_edge_clitic_count IS NULL
+            OR punctuation_gap_edge_clitic_count >= 0
+        ),
+    punctuation_gap_edge_clitic_ratio REAL
+        CHECK (
+            punctuation_gap_edge_clitic_ratio IS NULL
+            OR (
+                punctuation_gap_edge_clitic_ratio >= 0
+                AND punctuation_gap_edge_clitic_ratio <= 1
+            )
+        ),
+    max_component_information REAL
+        CHECK (max_component_information IS NULL OR max_component_information >= 0),
+    min_component_information REAL
+        CHECK (min_component_information IS NULL OR min_component_information >= 0),
+    high_information_token_count INTEGER
+        CHECK (
+            high_information_token_count IS NULL
+            OR high_information_token_count >= 0
+        ),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (inventory_version, candidate_key),
@@ -300,6 +335,13 @@ CREATE TABLE IF NOT EXISTS candidate_scores (
     score_version TEXT NOT NULL,
     candidate_id INTEGER NOT NULL,
     ranking_lane TEXT NOT NULL CHECK (ranking_lane IN ('1gram', '2gram', '3gram')),
+    passes_support_gate INTEGER NOT NULL CHECK (passes_support_gate IN (0, 1)),
+    passes_quality_gate INTEGER NOT NULL CHECK (passes_quality_gate IN (0, 1)),
+    discard_family TEXT
+        CHECK (
+            discard_family IS NULL
+            OR discard_family IN ('support_floor', 'edge_clitic_gap', 'weak_multiword')
+        ),
     is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),
     frequency_score REAL,
     dispersion_score REAL,
@@ -312,6 +354,8 @@ CREATE TABLE IF NOT EXISTS candidate_scores (
     PRIMARY KEY (inventory_version, score_version, candidate_id),
     CHECK (is_eligible = 1 OR lane_rank IS NULL),
     CHECK (is_eligible = 1 OR final_score IS NULL),
+    CHECK (is_eligible = 0 OR discard_family IS NULL),
+    CHECK (is_eligible = 1 OR discard_family IS NOT NULL),
     FOREIGN KEY (candidate_id, inventory_version)
         REFERENCES token_candidates(candidate_id, inventory_version)
         ON DELETE CASCADE

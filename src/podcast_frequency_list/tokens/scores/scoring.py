@@ -5,6 +5,15 @@ import math
 from podcast_frequency_list.tokens.scores.errors import CandidateScoresError
 from podcast_frequency_list.tokens.scores.policy import (
     _LANE_SPECS,
+    ASSOCIATION_KEEP_THRESHOLD,
+    BOUNDARY_KEEP_ASSOCIATION_FLOOR,
+    BOUNDARY_KEEP_THRESHOLD,
+    DISCARD_FAMILY_EDGE_CLITIC,
+    DISCARD_FAMILY_SUPPORT,
+    DISCARD_FAMILY_WEAK_MULTIWORD,
+    LEXICAL_KEEP_THRESHOLD,
+    LEXICAL_ONLY_ASSOCIATION_FLOOR,
+    PUNCTUATION_GAP_REJECT_THRESHOLD,
     REDUNDANCY_THRESHOLD,
 )
 from podcast_frequency_list.tokens.scores.types import _CandidateScoreInput, _CandidateScoreRow
@@ -16,17 +25,24 @@ def _build_scored_rows(
     score_version: str,
     candidate_inputs: tuple[_CandidateScoreInput, ...],
 ) -> tuple[_CandidateScoreRow, ...]:
+    _validate_multiword_metrics(candidate_inputs)
+
+    quality_gate_by_id = {
+        candidate.candidate_id: _evaluate_quality_gate(candidate)
+        for candidate in candidate_inputs
+    }
     eligible_by_lane = {
         lane_spec.ranking_lane: [
             candidate
             for candidate in candidate_inputs
-            if candidate.ranking_lane == lane_spec.ranking_lane and candidate.is_eligible
+            if (
+                candidate.ranking_lane == lane_spec.ranking_lane
+                and candidate.passes_support_gate
+                and quality_gate_by_id[candidate.candidate_id][0]
+            )
         ]
         for lane_spec in _LANE_SPECS.values()
     }
-
-    _validate_lane_metrics(eligible_by_lane["2gram"], lane_name="2gram")
-    _validate_lane_metrics(eligible_by_lane["3gram"], lane_name="3gram")
 
     scored_by_id: dict[int, _CandidateScoreRow] = {}
     for lane_name, eligible_candidates in eligible_by_lane.items():
@@ -45,12 +61,20 @@ def _build_scored_rows(
             rows.append(scored_row)
             continue
 
+        passes_quality_gate, discard_family = quality_gate_by_id[candidate.candidate_id]
         rows.append(
             _CandidateScoreRow(
                 inventory_version=inventory_version,
                 score_version=score_version,
                 candidate_id=candidate.candidate_id,
                 ranking_lane=candidate.ranking_lane,
+                passes_support_gate=int(candidate.passes_support_gate),
+                passes_quality_gate=int(passes_quality_gate),
+                discard_family=(
+                    DISCARD_FAMILY_SUPPORT
+                    if not candidate.passes_support_gate
+                    else discard_family
+                ),
                 is_eligible=0,
                 frequency_score=None,
                 dispersion_score=None,
@@ -65,12 +89,13 @@ def _build_scored_rows(
     return tuple(rows)
 
 
-def _validate_lane_metrics(
-    candidates: list[_CandidateScoreInput],
-    *,
-    lane_name: str,
+def _validate_multiword_metrics(
+    candidates: tuple[_CandidateScoreInput, ...],
 ) -> None:
     for candidate in candidates:
+        if candidate.ngram_size == 1 or not candidate.passes_support_gate:
+            continue
+        lane_name = candidate.ranking_lane
         if candidate.t_score is None or candidate.npmi is None:
             raise CandidateScoresError(
                 f"{lane_name} candidate {candidate.candidate_key!r} is missing association metrics"
@@ -79,6 +104,44 @@ def _validate_lane_metrics(
             raise CandidateScoresError(
                 f"{lane_name} candidate {candidate.candidate_key!r} is missing boundary metrics"
             )
+        if (
+            candidate.punctuation_gap_occurrence_ratio is None
+            or candidate.punctuation_gap_edge_clitic_ratio is None
+            or candidate.max_component_information is None
+        ):
+            raise CandidateScoresError(
+                f"{lane_name} candidate {candidate.candidate_key!r} "
+                "is missing unit identity metrics"
+            )
+
+
+def _evaluate_quality_gate(candidate: _CandidateScoreInput) -> tuple[bool, str | None]:
+    if not candidate.passes_support_gate:
+        return False, None
+
+    if candidate.ngram_size == 1:
+        return True, None
+
+    if (candidate.punctuation_gap_edge_clitic_ratio or 0.0) > 0.0:
+        return False, DISCARD_FAMILY_EDGE_CLITIC
+
+    if (candidate.punctuation_gap_occurrence_ratio or 0.0) >= PUNCTUATION_GAP_REJECT_THRESHOLD:
+        return False, DISCARD_FAMILY_EDGE_CLITIC
+
+    npmi = float(candidate.npmi)
+    min_entropy = min(float(candidate.left_entropy), float(candidate.right_entropy))
+    max_component_information = float(candidate.max_component_information)
+    passes_association_keep = npmi >= ASSOCIATION_KEEP_THRESHOLD
+    passes_boundary_keep = (
+        min_entropy >= BOUNDARY_KEEP_THRESHOLD and npmi >= BOUNDARY_KEEP_ASSOCIATION_FLOOR
+    )
+    passes_lexical_keep = max_component_information >= LEXICAL_KEEP_THRESHOLD
+    if passes_lexical_keep and not (passes_association_keep or passes_boundary_keep):
+        passes_lexical_keep = npmi >= LEXICAL_ONLY_ASSOCIATION_FLOOR
+
+    if passes_association_keep or passes_boundary_keep or passes_lexical_keep:
+        return True, None
+    return False, DISCARD_FAMILY_WEAK_MULTIWORD
 
 
 def _score_lane(
@@ -111,6 +174,9 @@ def _score_lane(
                 score_version=score_version,
                 candidate_id=candidate.candidate_id,
                 ranking_lane=lane_name,
+                passes_support_gate=1,
+                passes_quality_gate=1,
+                discard_family=None,
                 is_eligible=1,
                 frequency_score=frequency_scores[candidate.candidate_id],
                 dispersion_score=dispersion_scores[candidate.candidate_id],
@@ -161,6 +227,9 @@ def _score_lane(
                 score_version=score_version,
                 candidate_id=candidate.candidate_id,
                 ranking_lane=lane_name,
+                passes_support_gate=1,
+                passes_quality_gate=1,
+                discard_family=None,
                 is_eligible=1,
                 frequency_score=frequency_score,
                 dispersion_score=dispersion_score,
@@ -249,6 +318,9 @@ def _assign_lane_ranks(
             score_version=row.score_version,
             candidate_id=row.candidate_id,
             ranking_lane=row.ranking_lane,
+            passes_support_gate=row.passes_support_gate,
+            passes_quality_gate=row.passes_quality_gate,
+            discard_family=row.discard_family,
             is_eligible=row.is_eligible,
             frequency_score=row.frequency_score,
             dispersion_score=row.dispersion_score,

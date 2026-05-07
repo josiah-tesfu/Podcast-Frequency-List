@@ -54,34 +54,38 @@ class CandidateScoresService:
         *,
         ngram_size: int,
         limit: int = DEFAULT_SUMMARY_LIMIT,
+        offset: int = 0,
         inventory_version: str = INVENTORY_VERSION,
         score_version: str = SCORE_VERSION,
     ) -> tuple[CandidateSummaryRow, ...]:
         _validate_ngram_size(ngram_size)
         _validate_limit(limit)
+        _validate_offset(offset)
 
         with connect(self.db_path) as connection:
             return _CandidateScoreSummaryStore(
                 connection=connection,
                 inventory_version=inventory_version,
                 score_version=score_version,
-            ).list_top_candidates(ngram_size=ngram_size, limit=limit)
+            ).list_top_candidates(ngram_size=ngram_size, limit=limit, offset=offset)
 
     def list_global_candidates(
         self,
         *,
         limit: int = DEFAULT_SUMMARY_LIMIT,
+        offset: int = 0,
         inventory_version: str = INVENTORY_VERSION,
         score_version: str = SCORE_VERSION,
     ) -> tuple[CandidateSummaryRow, ...]:
         _validate_limit(limit)
+        _validate_offset(offset)
 
         with connect(self.db_path) as connection:
             return _CandidateScoreSummaryStore(
                 connection=connection,
                 inventory_version=inventory_version,
                 score_version=score_version,
-            ).list_global_candidates(limit=limit)
+            ).list_global_candidates(limit=limit, offset=offset)
 
     def refresh(
         self,
@@ -116,3 +120,8 @@ def _validate_ngram_size(ngram_size: int) -> None:
 def _validate_limit(limit: int) -> None:
     if limit < 1:
         raise CandidateScoresError("limit must be positive")
+
+
+def _validate_offset(offset: int) -> None:
+    if offset < 0:
+        raise CandidateScoresError("offset must be non-negative")

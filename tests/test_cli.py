@@ -308,7 +308,7 @@ class FakeCandidateMetricsService:
     def __init__(self) -> None:
         self.refresh_calls = 0
         self.validation_calls = 0
-        self.top_candidate_requests: list[tuple[int, int]] = []
+        self.top_candidate_requests: list[tuple[int, int, int]] = []
         self.focus_candidate_requests: list[tuple[str, ...]] = []
 
     def refresh(self) -> CandidateMetricsResult:
@@ -343,9 +343,10 @@ class FakeCandidateMetricsService:
         *,
         ngram_size: int,
         limit: int = 20,
+        offset: int = 0,
         inventory_version: str = "1",
     ) -> tuple[CandidateSummaryRow, ...]:
-        self.top_candidate_requests.append((ngram_size, limit))
+        self.top_candidate_requests.append((ngram_size, limit, offset))
         return (
             CandidateSummaryRow(
                 candidate_key=f"candidate-{ngram_size}",
@@ -360,6 +361,13 @@ class FakeCandidateMetricsService:
                 right_context_type_count=None if ngram_size == 1 else ngram_size + 1,
                 left_entropy=None if ngram_size == 1 else 0.2 * ngram_size,
                 right_entropy=None if ngram_size == 1 else 0.3 * ngram_size,
+                punctuation_gap_occurrence_count=None if ngram_size == 1 else ngram_size - 2,
+                punctuation_gap_occurrence_ratio=None if ngram_size == 1 else 0.05 * ngram_size,
+                punctuation_gap_edge_clitic_count=None if ngram_size == 1 else 0,
+                punctuation_gap_edge_clitic_ratio=None if ngram_size == 1 else 0.0,
+                max_component_information=None if ngram_size == 1 else 1.5 + (0.1 * ngram_size),
+                min_component_information=None if ngram_size == 1 else 0.7 + (0.1 * ngram_size),
+                high_information_token_count=None if ngram_size == 1 else 1,
                 covered_by_any_count=None if ngram_size == 3 else ngram_size,
                 covered_by_any_ratio=None if ngram_size == 3 else 0.25 * ngram_size,
                 independent_occurrence_count=None if ngram_size == 3 else 9 * ngram_size,
@@ -398,6 +406,13 @@ class FakeCandidateMetricsService:
                     right_context_type_count=3 if len(key.split()) >= 2 else None,
                     left_entropy=0.41 if len(key.split()) >= 2 else None,
                     right_entropy=0.92 if len(key.split()) >= 2 else None,
+                    punctuation_gap_occurrence_count=1 if len(key.split()) >= 2 else None,
+                    punctuation_gap_occurrence_ratio=0.14 if len(key.split()) >= 2 else None,
+                    punctuation_gap_edge_clitic_count=0 if len(key.split()) >= 2 else None,
+                    punctuation_gap_edge_clitic_ratio=0.0 if len(key.split()) >= 2 else None,
+                    max_component_information=2.1 if len(key.split()) >= 2 else None,
+                    min_component_information=0.8 if len(key.split()) >= 2 else None,
+                    high_information_token_count=1 if len(key.split()) >= 2 else None,
                     covered_by_any_count=4 if len(key.split()) < 3 else None,
                     covered_by_any_ratio=0.57 if len(key.split()) < 3 else None,
                     independent_occurrence_count=3 if len(key.split()) < 3 else None,
@@ -418,17 +433,19 @@ class FakeCandidateScoresService:
     def __init__(self) -> None:
         self.refresh_calls = 0
         self.summary_calls = 0
-        self.top_candidate_requests: list[tuple[int, int]] = []
-        self.global_candidate_requests: list[int] = []
+        self.top_candidate_requests: list[tuple[int, int, int]] = []
+        self.global_candidate_requests: list[tuple[int, int]] = []
         self.focus_candidate_requests: list[tuple[str, ...]] = []
 
     def refresh(self) -> CandidateScoresResult:
         self.refresh_calls += 1
         return CandidateScoresResult(
             inventory_version="1",
-            score_version="pilot-v1",
+            score_version="pilot-v2",
             selected_candidates=49_542,
             stored_candidates=49_542,
+            support_pass_candidates=900,
+            quality_pass_candidates=624,
             eligible_candidates=804,
             eligible_1gram_candidates=205,
             eligible_2gram_candidates=453,
@@ -439,9 +456,11 @@ class FakeCandidateScoresService:
         self.summary_calls += 1
         return CandidateScoresResult(
             inventory_version="1",
-            score_version="pilot-v1",
+            score_version="pilot-v2",
             selected_candidates=49_542,
             stored_candidates=49_542,
+            support_pass_candidates=900,
+            quality_pass_candidates=624,
             eligible_candidates=804,
             eligible_1gram_candidates=205,
             eligible_2gram_candidates=453,
@@ -453,10 +472,11 @@ class FakeCandidateScoresService:
         *,
         ngram_size: int,
         limit: int = 20,
+        offset: int = 0,
         inventory_version: str = "1",
-        score_version: str = "pilot-v1",
+        score_version: str = "pilot-v2",
     ) -> tuple[CandidateSummaryRow, ...]:
-        self.top_candidate_requests.append((ngram_size, limit))
+        self.top_candidate_requests.append((ngram_size, limit, offset))
         return (
             CandidateSummaryRow(
                 candidate_key=f"score-candidate-{ngram_size}",
@@ -471,6 +491,13 @@ class FakeCandidateScoresService:
                 right_context_type_count=None if ngram_size == 1 else ngram_size + 1,
                 left_entropy=None if ngram_size == 1 else 0.2 * ngram_size,
                 right_entropy=None if ngram_size == 1 else 0.3 * ngram_size,
+                punctuation_gap_occurrence_count=None if ngram_size == 1 else ngram_size - 2,
+                punctuation_gap_occurrence_ratio=None if ngram_size == 1 else 0.05 * ngram_size,
+                punctuation_gap_edge_clitic_count=None if ngram_size == 1 else 0,
+                punctuation_gap_edge_clitic_ratio=None if ngram_size == 1 else 0.0,
+                max_component_information=None if ngram_size == 1 else 1.5 + (0.1 * ngram_size),
+                min_component_information=None if ngram_size == 1 else 0.7 + (0.1 * ngram_size),
+                high_information_token_count=None if ngram_size == 1 else 1,
                 covered_by_any_count=None if ngram_size == 3 else ngram_size,
                 covered_by_any_ratio=None if ngram_size == 3 else 0.25 * ngram_size,
                 independent_occurrence_count=None if ngram_size == 3 else 9 * ngram_size,
@@ -481,6 +508,9 @@ class FakeCandidateScoresService:
                 dominant_parent_side=None if ngram_size == 3 else "left",
                 score_version=score_version,
                 ranking_lane=f"{ngram_size}gram",
+                passes_support_gate=1,
+                passes_quality_gate=1,
+                discard_family=None,
                 is_eligible=1,
                 frequency_score=0.3 * ngram_size,
                 dispersion_score=0.2 * ngram_size,
@@ -496,10 +526,11 @@ class FakeCandidateScoresService:
         self,
         *,
         limit: int = 20,
+        offset: int = 0,
         inventory_version: str = "1",
-        score_version: str = "pilot-v1",
+        score_version: str = "pilot-v2",
     ) -> tuple[CandidateSummaryRow, ...]:
-        self.global_candidate_requests.append(limit)
+        self.global_candidate_requests.append((limit, offset))
         return (
             CandidateSummaryRow(
                 candidate_key="global-candidate-1",
@@ -518,6 +549,9 @@ class FakeCandidateScoresService:
                 dominant_parent_side="right",
                 score_version=score_version,
                 ranking_lane="1gram",
+                passes_support_gate=1,
+                passes_quality_gate=1,
+                discard_family=None,
                 is_eligible=1,
                 frequency_score=0.9,
                 dispersion_score=1.0,
@@ -540,6 +574,13 @@ class FakeCandidateScoresService:
                 right_context_type_count=4,
                 left_entropy=0.7,
                 right_entropy=0.8,
+                punctuation_gap_occurrence_count=1,
+                punctuation_gap_occurrence_ratio=0.025,
+                punctuation_gap_edge_clitic_count=0,
+                punctuation_gap_edge_clitic_ratio=0.0,
+                max_component_information=2.4,
+                min_component_information=0.8,
+                high_information_token_count=1,
                 covered_by_any_count=40,
                 covered_by_any_ratio=1.0,
                 independent_occurrence_count=0,
@@ -550,6 +591,9 @@ class FakeCandidateScoresService:
                 dominant_parent_side="right",
                 score_version=score_version,
                 ranking_lane="2gram",
+                passes_support_gate=1,
+                passes_quality_gate=1,
+                discard_family=None,
                 is_eligible=1,
                 frequency_score=0.8,
                 dispersion_score=0.9,
@@ -566,7 +610,7 @@ class FakeCandidateScoresService:
         *,
         candidate_keys: tuple[str, ...] | list[str],
         inventory_version: str = "1",
-        score_version: str = "pilot-v1",
+        score_version: str = "pilot-v2",
     ) -> tuple[CandidateSummaryRow, ...]:
         requested_keys = tuple(candidate_keys)
         self.focus_candidate_requests.append(requested_keys)
@@ -590,6 +634,13 @@ class FakeCandidateScoresService:
                     right_context_type_count=3 if ngram_size >= 2 else None,
                     left_entropy=0.41 if ngram_size >= 2 else None,
                     right_entropy=0.92 if ngram_size >= 2 else None,
+                    punctuation_gap_occurrence_count=1 if ngram_size >= 2 else None,
+                    punctuation_gap_occurrence_ratio=0.14 if ngram_size >= 2 else None,
+                    punctuation_gap_edge_clitic_count=0 if ngram_size >= 2 else None,
+                    punctuation_gap_edge_clitic_ratio=0.0 if ngram_size >= 2 else None,
+                    max_component_information=2.1 if ngram_size >= 2 else None,
+                    min_component_information=0.8 if ngram_size >= 2 else None,
+                    high_information_token_count=1 if ngram_size >= 2 else None,
                     covered_by_any_count=4 if ngram_size < 3 else None,
                     covered_by_any_ratio=0.57 if ngram_size < 3 else None,
                     independent_occurrence_count=3 if ngram_size < 3 else None,
@@ -600,13 +651,18 @@ class FakeCandidateScoresService:
                     dominant_parent_side="left" if ngram_size < 3 else None,
                     score_version=score_version,
                     ranking_lane=f"{ngram_size}gram",
+                    passes_support_gate=0 if key == "de" else 1,
+                    passes_quality_gate=0 if key == "de" else 1,
+                    discard_family="support_floor" if key == "de" else None,
                     is_eligible=0 if key == "de" else 1,
-                    frequency_score=0.44,
-                    dispersion_score=0.33,
-                    association_score=0.77 if ngram_size >= 2 else None,
-                    boundary_score=0.22 if ngram_size >= 2 else None,
-                    redundancy_penalty=0.11 if ngram_size == 2 else 0.0,
-                    final_score=0.66,
+                    frequency_score=None if key == "de" else 0.44,
+                    dispersion_score=None if key == "de" else 0.33,
+                    association_score=None
+                    if key == "de" or ngram_size < 2
+                    else 0.77,
+                    boundary_score=None if key == "de" or ngram_size < 2 else 0.22,
+                    redundancy_penalty=None if key == "de" else 0.11 if ngram_size == 2 else 0.0,
+                    final_score=None if key == "de" else 0.66,
                     lane_rank=None if key == "de" else 5,
                 )
             )
@@ -1103,9 +1159,11 @@ def test_refresh_candidate_scores_prints_stats(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert result.stdout.splitlines() == [
         "inventory_version=1",
-        "score_version=pilot-v1",
+        "score_version=pilot-v2",
         "selected_candidates=49542",
         "stored_candidates=49542",
+        "support_pass_candidates=900",
+        "quality_pass_candidates=624",
         "eligible_candidates=804",
         "eligible_1gram_candidates=205",
         "eligible_2gram_candidates=453",
@@ -1134,6 +1192,8 @@ def test_inspect_candidate_scores_prints_summary_and_rows(tmp_path, monkeypatch)
             "inspect-candidate-scores",
             "--limit",
             "2",
+            "--offset",
+            "1",
             "--candidate-key",
             "en fait",
             "--candidate-key",
@@ -1144,90 +1204,46 @@ def test_inspect_candidate_scores_prints_summary_and_rows(tmp_path, monkeypatch)
     )
 
     assert result.exit_code == 0
-    assert "score_version=pilot-v1" in result.stdout
+    assert "score_version=pilot-v2" in result.stdout
     assert "stored_candidates=49542" in result.stdout
+    assert "support_pass_candidates=900" in result.stdout
+    assert "quality_pass_candidates=624" in result.stdout
     assert "eligible_candidates=804" in result.stdout
     assert "top_candidate_count_1gram=1" in result.stdout
     assert "top_candidate_count_2gram=1" in result.stdout
     assert "top_candidate_count_3gram=1" in result.stdout
     assert "top_candidate_count_global=2" in result.stdout
+    assert "record=top_1gram\trank=2\tcandidate_key=score-candidate-1" in result.stdout
     assert (
-        "record=top_1gram\trank=1\tcandidate_key=score-candidate-1"
-        "\tdisplay_text=score candidate 1\tngram_size=1\traw_frequency=10"
-        "\tepisode_dispersion=2\tshow_dispersion=1\tcovered_by_any_count=1"
-        "\tcovered_by_any_ratio=0.25\tindependent_occurrence_count=9"
-        "\tdirect_parent_count=2\tdominant_parent_key=parent-1"
-        "\tdominant_parent_shared_count=3\tdominant_parent_share=0.15"
-        "\tdominant_parent_side=left\tscore_version=pilot-v1\tranking_lane=1gram"
-        "\tis_eligible=1\tfrequency_score=0.3\tdispersion_score=0.2"
-        "\tassociation_score=-\tboundary_score=-\tredundancy_penalty=0.0"
-        "\tfinal_score=0.5\tlane_rank=1"
+        "\tscore_version=pilot-v2\tranking_lane=1gram\tpasses_support_gate=1"
+        "\tpasses_quality_gate=1\tdiscard_family=-\tis_eligible=1"
         in result.stdout
     )
+    assert "record=top_2gram\trank=2\tcandidate_key=score-candidate-2" in result.stdout
     assert (
-        "record=top_2gram\trank=1\tcandidate_key=score-candidate-2"
-        "\tdisplay_text=score candidate 2\tngram_size=2\traw_frequency=20"
-        "\tepisode_dispersion=3\tshow_dispersion=1\tt_score=5.0\tnpmi=0.7"
-        "\tleft_context_type_count=2\tright_context_type_count=3"
-        "\tleft_entropy=0.4\tright_entropy=0.6\tcovered_by_any_count=2"
-        "\tcovered_by_any_ratio=0.5\tindependent_occurrence_count=18"
-        "\tdirect_parent_count=3\tdominant_parent_key=parent-2"
-        "\tdominant_parent_shared_count=4\tdominant_parent_share=0.3"
-        "\tdominant_parent_side=left\tscore_version=pilot-v1\tranking_lane=2gram"
-        "\tis_eligible=1\tfrequency_score=0.6\tdispersion_score=0.4"
-        "\tassociation_score=0.8\tboundary_score=0.2\tredundancy_penalty=0.0"
-        "\tfinal_score=1.0\tlane_rank=1"
+        "\tscore_version=pilot-v2\tranking_lane=2gram\tpasses_support_gate=1"
+        "\tpasses_quality_gate=1\tdiscard_family=-\tis_eligible=1"
         in result.stdout
     )
+    assert "record=top_global\trank=2\tcandidate_key=global-candidate-1" in result.stdout
+    assert "record=top_global\trank=3\tcandidate_key=global-candidate-2" in result.stdout
     assert (
-        "record=top_global\trank=1\tcandidate_key=global-candidate-1"
-        "\tdisplay_text=global candidate 1\tngram_size=1\traw_frequency=50"
-        "\tepisode_dispersion=6\tshow_dispersion=1\tt_score=-\tnpmi=-"
-        "\tleft_context_type_count=-\tright_context_type_count=-"
-        "\tleft_entropy=-\tright_entropy=-\tcovered_by_any_count=50"
-        "\tcovered_by_any_ratio=1.0\tindependent_occurrence_count=0"
-        "\tdirect_parent_count=10\tdominant_parent_key=de la"
-        "\tdominant_parent_shared_count=5\tdominant_parent_share=0.1"
-        "\tdominant_parent_side=right\tscore_version=pilot-v1"
-        "\tranking_lane=1gram\tis_eligible=1\tfrequency_score=0.9"
-        "\tdispersion_score=1.0\tassociation_score=-\tboundary_score=-"
-        "\tredundancy_penalty=0.0\tfinal_score=0.95\tlane_rank=2"
+        "\tpasses_support_gate=1\tpasses_quality_gate=1\tdiscard_family=-\tis_eligible=1"
         in result.stdout
     )
+    assert "record=focus_candidate\trank=2\tcandidate_key=de\tdisplay_text=de" in result.stdout
     assert (
-        "record=top_global\trank=2\tcandidate_key=global-candidate-2"
-        "\tdisplay_text=global candidate 2\tngram_size=2\traw_frequency=40"
-        "\tepisode_dispersion=5\tshow_dispersion=1\tt_score=6.0\tnpmi=0.8"
-        "\tleft_context_type_count=3\tright_context_type_count=4"
-        "\tleft_entropy=0.7\tright_entropy=0.8\tcovered_by_any_count=40"
-        "\tcovered_by_any_ratio=1.0\tindependent_occurrence_count=0"
-        "\tdirect_parent_count=6\tdominant_parent_key=c est un"
-        "\tdominant_parent_shared_count=8\tdominant_parent_share=0.2"
-        "\tdominant_parent_side=right\tscore_version=pilot-v1"
-        "\tranking_lane=2gram\tis_eligible=1\tfrequency_score=0.8"
-        "\tdispersion_score=0.9\tassociation_score=0.85\tboundary_score=0.75"
-        "\tredundancy_penalty=0.0\tfinal_score=0.9\tlane_rank=1"
-        in result.stdout
-    )
-    assert (
-        "record=focus_candidate\trank=2\tcandidate_key=de\tdisplay_text=de"
-        "\tngram_size=1\traw_frequency=7\tepisode_dispersion=3\tshow_dispersion=1"
-        "\tt_score=-\tnpmi=-\tleft_context_type_count=-\tright_context_type_count=-"
-        "\tleft_entropy=-\tright_entropy=-\tcovered_by_any_count=4"
-        "\tcovered_by_any_ratio=0.57\tindependent_occurrence_count=3"
-        "\tdirect_parent_count=2\tdominant_parent_key=je en fait"
-        "\tdominant_parent_shared_count=3\tdominant_parent_share=0.43"
-        "\tdominant_parent_side=left\tscore_version=pilot-v1\tranking_lane=1gram"
-        "\tis_eligible=0\tfrequency_score=0.44\tdispersion_score=0.33"
-        "\tassociation_score=-\tboundary_score=-\tredundancy_penalty=0.0"
-        "\tfinal_score=0.66\tlane_rank=-"
+        "\tranking_lane=1gram\tpasses_support_gate=0\tpasses_quality_gate=0"
+        "\tdiscard_family=support_floor\tis_eligible=0\tfrequency_score=-"
+        "\tdispersion_score=-\tassociation_score=-\tboundary_score=-"
+        "\tredundancy_penalty=-\tfinal_score=-\tlane_rank=-"
         in result.stdout
     )
     assert "focus_missing_count=1" in result.stdout
     assert "focus_missing=missing" in result.stdout
     assert fake_service.summary_calls == 1
-    assert fake_service.top_candidate_requests == [(1, 2), (2, 2), (3, 2)]
-    assert fake_service.global_candidate_requests == [2]
+    assert fake_service.top_candidate_requests == [(1, 2, 1), (2, 2, 1), (3, 2, 1)]
+    assert fake_service.global_candidate_requests == [(2, 1)]
     assert fake_service.focus_candidate_requests == [("en fait", "de", "missing")]
 
     load_settings.cache_clear()
@@ -1242,9 +1258,11 @@ def test_inspect_candidate_scores_fails_without_scores(tmp_path, monkeypatch) ->
     fake_service = FakeCandidateScoresService()
     fake_service.summarize = lambda: CandidateScoresResult(
         inventory_version="1",
-        score_version="pilot-v1",
+        score_version="pilot-v2",
         selected_candidates=23,
         stored_candidates=0,
+        support_pass_candidates=0,
+        quality_pass_candidates=0,
         eligible_candidates=0,
         eligible_1gram_candidates=0,
         eligible_2gram_candidates=0,
@@ -1281,6 +1299,8 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
             "inspect-candidate-metrics",
             "--limit",
             "2",
+            "--offset",
+            "1",
             "--candidate-key",
             "en fait",
             "--candidate-key",
@@ -1295,7 +1315,7 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
     assert "top_candidate_count_2gram=1" in result.stdout
     assert "top_candidate_count_3gram=1" in result.stdout
     assert (
-        "record=top_1gram\trank=1\tcandidate_key=candidate-1\tdisplay_text=candidate 1"
+        "record=top_1gram\trank=2\tcandidate_key=candidate-1\tdisplay_text=candidate 1"
         "\tngram_size=1\traw_frequency=10\tepisode_dispersion=2\tshow_dispersion=1"
         "\tcovered_by_any_count=1\tcovered_by_any_ratio=0.25"
         "\tindependent_occurrence_count=9\tdirect_parent_count=2"
@@ -1304,10 +1324,14 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
         in result.stdout
     )
     assert (
-        "record=top_2gram\trank=1\tcandidate_key=candidate-2\tdisplay_text=candidate 2"
+        "record=top_2gram\trank=2\tcandidate_key=candidate-2\tdisplay_text=candidate 2"
         "\tngram_size=2\traw_frequency=20\tepisode_dispersion=3\tshow_dispersion=1"
         "\tt_score=5.0\tnpmi=0.7\tleft_context_type_count=2\tright_context_type_count=3"
-        "\tleft_entropy=0.4\tright_entropy=0.6\tcovered_by_any_count=2"
+        "\tleft_entropy=0.4\tright_entropy=0.6"
+        "\tpunctuation_gap_occurrence_count=0\tpunctuation_gap_occurrence_ratio=0.1"
+        "\tpunctuation_gap_edge_clitic_count=0\tpunctuation_gap_edge_clitic_ratio=0.0"
+        "\tmax_component_information=1.7\tmin_component_information=0.8999999999999999"
+        "\thigh_information_token_count=1\tcovered_by_any_count=2"
         "\tcovered_by_any_ratio=0.5\tindependent_occurrence_count=18"
         "\tdirect_parent_count=3\tdominant_parent_key=parent-2"
         "\tdominant_parent_shared_count=4\tdominant_parent_share=0.3"
@@ -1318,7 +1342,11 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
         "record=focus_candidate\trank=1\tcandidate_key=en fait\tdisplay_text=en fait"
         "\tngram_size=2\traw_frequency=7\tepisode_dispersion=3\tshow_dispersion=1"
         "\tt_score=4.2\tnpmi=0.77\tleft_context_type_count=2\tright_context_type_count=3"
-        "\tleft_entropy=0.41\tright_entropy=0.92\tcovered_by_any_count=4"
+        "\tleft_entropy=0.41\tright_entropy=0.92"
+        "\tpunctuation_gap_occurrence_count=1\tpunctuation_gap_occurrence_ratio=0.14"
+        "\tpunctuation_gap_edge_clitic_count=0\tpunctuation_gap_edge_clitic_ratio=0.0"
+        "\tmax_component_information=2.1\tmin_component_information=0.8"
+        "\thigh_information_token_count=1\tcovered_by_any_count=4"
         "\tcovered_by_any_ratio=0.57\tindependent_occurrence_count=3"
         "\tdirect_parent_count=2\tdominant_parent_key=je en fait"
         "\tdominant_parent_shared_count=3\tdominant_parent_share=0.43"
@@ -1328,7 +1356,7 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
     assert "focus_missing_count=1" in result.stdout
     assert "focus_missing=missing" in result.stdout
     assert fake_service.validation_calls == 1
-    assert fake_service.top_candidate_requests == [(1, 2), (2, 2), (3, 2)]
+    assert fake_service.top_candidate_requests == [(1, 2, 1), (2, 2, 1), (3, 2, 1)]
     assert fake_service.focus_candidate_requests == [("en fait", "missing")]
 
     load_settings.cache_clear()

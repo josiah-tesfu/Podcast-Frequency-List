@@ -111,6 +111,8 @@ CANDIDATE_SCORES_RESULT_FIELDS: tuple[FieldSpec, ...] = (
     ("score_version", "score_version"),
     ("selected_candidates", "selected_candidates"),
     ("stored_candidates", "stored_candidates"),
+    ("support_pass_candidates", "support_pass_candidates"),
+    ("quality_pass_candidates", "quality_pass_candidates"),
     ("eligible_candidates", "eligible_candidates"),
     ("eligible_1gram_candidates", "eligible_1gram_candidates"),
     ("eligible_2gram_candidates", "eligible_2gram_candidates"),

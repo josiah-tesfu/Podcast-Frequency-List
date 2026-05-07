@@ -420,6 +420,13 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         "right_context_type_count",
         "left_entropy",
         "right_entropy",
+        "punctuation_gap_occurrence_count",
+        "punctuation_gap_occurrence_ratio",
+        "punctuation_gap_edge_clitic_count",
+        "punctuation_gap_edge_clitic_ratio",
+        "max_component_information",
+        "min_component_information",
+        "high_information_token_count",
     } <= candidate_columns.keys()
     assert {
         "inventory_version",
@@ -434,6 +441,9 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         "score_version",
         "candidate_id",
         "ranking_lane",
+        "passes_support_gate",
+        "passes_quality_gate",
+        "discard_family",
         "is_eligible",
         "frequency_score",
         "dispersion_score",
@@ -459,6 +469,20 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert candidate_columns["left_entropy"]["dflt_value"] is None
     assert candidate_columns["right_entropy"]["notnull"] == 0
     assert candidate_columns["right_entropy"]["dflt_value"] is None
+    assert candidate_columns["punctuation_gap_occurrence_count"]["notnull"] == 0
+    assert candidate_columns["punctuation_gap_occurrence_count"]["dflt_value"] is None
+    assert candidate_columns["punctuation_gap_occurrence_ratio"]["notnull"] == 0
+    assert candidate_columns["punctuation_gap_occurrence_ratio"]["dflt_value"] is None
+    assert candidate_columns["punctuation_gap_edge_clitic_count"]["notnull"] == 0
+    assert candidate_columns["punctuation_gap_edge_clitic_count"]["dflt_value"] is None
+    assert candidate_columns["punctuation_gap_edge_clitic_ratio"]["notnull"] == 0
+    assert candidate_columns["punctuation_gap_edge_clitic_ratio"]["dflt_value"] is None
+    assert candidate_columns["max_component_information"]["notnull"] == 0
+    assert candidate_columns["max_component_information"]["dflt_value"] is None
+    assert candidate_columns["min_component_information"]["notnull"] == 0
+    assert candidate_columns["min_component_information"]["dflt_value"] is None
+    assert candidate_columns["high_information_token_count"]["notnull"] == 0
+    assert candidate_columns["high_information_token_count"]["dflt_value"] is None
     assert containment_columns["inventory_version"]["notnull"] == 1
     assert containment_columns["smaller_candidate_id"]["notnull"] == 1
     assert containment_columns["larger_candidate_id"]["notnull"] == 1
@@ -469,6 +493,9 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert score_columns["score_version"]["notnull"] == 1
     assert score_columns["candidate_id"]["notnull"] == 1
     assert score_columns["ranking_lane"]["notnull"] == 1
+    assert score_columns["passes_support_gate"]["notnull"] == 1
+    assert score_columns["passes_quality_gate"]["notnull"] == 1
+    assert score_columns["discard_family"]["notnull"] == 0
     assert score_columns["is_eligible"]["notnull"] == 1
     assert score_columns["created_at"]["notnull"] == 1
     assert score_columns["created_at"]["dflt_value"] == "CURRENT_TIMESTAMP"
@@ -483,8 +510,13 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert "'1gram'" in score_table_sql
     assert "'2gram'" in score_table_sql
     assert "'3gram'" in score_table_sql
+    assert "'support_floor'" in score_table_sql
+    assert "'edge_clitic_gap'" in score_table_sql
+    assert "'weak_multiword'" in score_table_sql
     assert "is_eligible = 1 OR lane_rank IS NULL" in score_table_sql
     assert "is_eligible = 1 OR final_score IS NULL" in score_table_sql
+    assert "is_eligible = 0 OR discard_family IS NULL" in score_table_sql
+    assert "is_eligible = 1 OR discard_family IS NOT NULL" in score_table_sql
     assert {
         "idx_token_candidates_inventory_version",
         "idx_token_candidates_ngram_size",
@@ -758,6 +790,125 @@ def test_bootstrap_creates_candidate_containment_table_from_v11_schema(tmp_path)
     assert foreign_key_issues == []
 
 
+def test_bootstrap_migrates_followup_b_columns_from_v14_schema(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+                show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+                t_score REAL,
+                npmi REAL,
+                left_context_type_count INTEGER
+                    CHECK (left_context_type_count IS NULL OR left_context_type_count >= 0),
+                right_context_type_count INTEGER
+                    CHECK (right_context_type_count IS NULL OR right_context_type_count >= 0),
+                left_entropy REAL
+                    CHECK (left_entropy IS NULL OR left_entropy >= 0),
+                right_entropy REAL
+                    CHECK (right_entropy IS NULL OR right_entropy >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                t_score,
+                npmi,
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy
+            )
+            VALUES ('1', 'en fait', 'en fait', 2, 7, 3, 2, 1.5, 0.4, 2, 2, 0.2, 0.3)
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        candidate_columns = {
+            row["name"]: row
+            for row in connection.execute("PRAGMA table_info(token_candidates)").fetchall()
+        }
+        row = connection.execute(
+            """
+            SELECT
+                candidate_key,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                t_score,
+                npmi,
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy,
+                punctuation_gap_occurrence_count,
+                punctuation_gap_occurrence_ratio,
+                punctuation_gap_edge_clitic_count,
+                punctuation_gap_edge_clitic_ratio,
+                max_component_information,
+                min_component_information,
+                high_information_token_count
+            FROM token_candidates
+            WHERE candidate_key = 'en fait'
+            """
+        ).fetchone()
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert {
+        "punctuation_gap_occurrence_count",
+        "punctuation_gap_occurrence_ratio",
+        "punctuation_gap_edge_clitic_count",
+        "punctuation_gap_edge_clitic_ratio",
+        "max_component_information",
+        "min_component_information",
+        "high_information_token_count",
+    } <= candidate_columns.keys()
+    assert row["raw_frequency"] == 7
+    assert row["episode_dispersion"] == 3
+    assert row["show_dispersion"] == 2
+    assert row["t_score"] == 1.5
+    assert row["npmi"] == 0.4
+    assert row["left_context_type_count"] == 2
+    assert row["right_context_type_count"] == 2
+    assert row["left_entropy"] == 0.2
+    assert row["right_entropy"] == 0.3
+    assert row["punctuation_gap_occurrence_count"] is None
+    assert row["punctuation_gap_occurrence_ratio"] is None
+    assert row["punctuation_gap_edge_clitic_count"] is None
+    assert row["punctuation_gap_edge_clitic_ratio"] is None
+    assert row["max_component_information"] is None
+    assert row["min_component_information"] is None
+    assert row["high_information_token_count"] is None
+    assert schema_version == SCHEMA_VERSION
+    assert foreign_key_issues == []
+
+
 def test_bootstrap_migrates_candidate_containment_side_from_v12_schema(tmp_path) -> None:
     db_path = tmp_path / "test.db"
 
@@ -1027,6 +1178,9 @@ def test_bootstrap_creates_candidate_scores_table_from_v13_schema(tmp_path) -> N
         "score_version",
         "candidate_id",
         "ranking_lane",
+        "passes_support_gate",
+        "passes_quality_gate",
+        "discard_family",
         "is_eligible",
         "frequency_score",
         "dispersion_score",
@@ -1048,6 +1202,141 @@ def test_bootstrap_creates_candidate_scores_table_from_v13_schema(tmp_path) -> N
     assert containment_row["shared_occurrence_count"] == 7
     assert containment_row["shared_episode_count"] == 4
     assert containment_count == 1
+    assert schema_version == SCHEMA_VERSION
+    assert foreign_key_issues == []
+
+
+def test_bootstrap_migrates_candidate_scores_table_from_v15_schema(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+                show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                candidate_id,
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion
+            )
+            VALUES
+                (1, '1', 'de', 'de', 1, 25, 6, 1),
+                (2, '1', 'est que', 'est que', 2, 12, 4, 1)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE candidate_scores (
+                inventory_version TEXT NOT NULL,
+                score_version TEXT NOT NULL,
+                candidate_id INTEGER NOT NULL,
+                ranking_lane TEXT NOT NULL CHECK (ranking_lane IN ('1gram', '2gram', '3gram')),
+                is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),
+                frequency_score REAL,
+                dispersion_score REAL,
+                association_score REAL,
+                boundary_score REAL,
+                redundancy_penalty REAL,
+                final_score REAL,
+                lane_rank INTEGER CHECK (lane_rank IS NULL OR lane_rank > 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (inventory_version, score_version, candidate_id),
+                CHECK (is_eligible = 1 OR lane_rank IS NULL),
+                CHECK (is_eligible = 1 OR final_score IS NULL),
+                FOREIGN KEY (candidate_id, inventory_version)
+                    REFERENCES token_candidates(candidate_id, inventory_version)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE INDEX idx_candidate_scores_lane_rank
+                ON candidate_scores (
+                    inventory_version,
+                    score_version,
+                    ranking_lane,
+                    lane_rank
+                )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_scores (
+                inventory_version,
+                score_version,
+                candidate_id,
+                ranking_lane,
+                is_eligible,
+                frequency_score,
+                dispersion_score,
+                association_score,
+                boundary_score,
+                redundancy_penalty,
+                final_score,
+                lane_rank
+            )
+            VALUES
+                ('1', 'pilot-v1', 1, '1gram', 1, 0.9, 1.0, NULL, NULL, 0.0, 0.95, 1),
+                ('1', 'pilot-v1', 2, '2gram', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        score_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(candidate_scores)").fetchall()
+        }
+        rows = connection.execute(
+            """
+            SELECT
+                candidate_id,
+                passes_support_gate,
+                passes_quality_gate,
+                discard_family,
+                is_eligible,
+                final_score,
+                lane_rank
+            FROM candidate_scores
+            WHERE inventory_version = '1'
+            AND score_version = 'pilot-v1'
+            ORDER BY candidate_id
+            """
+        ).fetchall()
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert {"passes_support_gate", "passes_quality_gate", "discard_family"} <= score_columns
+    assert [tuple(row) for row in rows] == [
+        (1, 1, 1, None, 1, 0.95, 1),
+        (2, 0, 0, "support_floor", 0, None, None),
+    ]
     assert schema_version == SCHEMA_VERSION
     assert foreign_key_issues == []
 
@@ -1308,6 +1597,9 @@ def test_candidate_scores_enforce_uniqueness_and_foreign_keys(tmp_path) -> None:
                 score_version,
                 candidate_id,
                 ranking_lane,
+                passes_support_gate,
+                passes_quality_gate,
+                discard_family,
                 is_eligible,
                 frequency_score,
                 dispersion_score,
@@ -1315,9 +1607,9 @@ def test_candidate_scores_enforce_uniqueness_and_foreign_keys(tmp_path) -> None:
                 final_score,
                 lane_rank
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("1", "pilot-v1", one_gram_id, "1gram", 1, 0.8, 0.7, 0.0, 0.765, 1),
+            ("1", "pilot-v1", one_gram_id, "1gram", 1, 1, None, 1, 0.8, 0.7, 0.0, 0.765, 1),
         )
 
         with pytest.raises(sqlite3.IntegrityError):
@@ -1328,11 +1620,14 @@ def test_candidate_scores_enforce_uniqueness_and_foreign_keys(tmp_path) -> None:
                     score_version,
                     candidate_id,
                     ranking_lane,
+                    passes_support_gate,
+                    passes_quality_gate,
+                    discard_family,
                     is_eligible
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("1", "pilot-v1", one_gram_id, "1gram", 0),
+                ("1", "pilot-v1", one_gram_id, "1gram", 0, 0, "support_floor", 0),
             )
 
         connection.execute(
@@ -1342,11 +1637,14 @@ def test_candidate_scores_enforce_uniqueness_and_foreign_keys(tmp_path) -> None:
                 score_version,
                 candidate_id,
                 ranking_lane,
+                passes_support_gate,
+                passes_quality_gate,
+                discard_family,
                 is_eligible
             )
-            VALUES (?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("1", "pilot-v2", one_gram_id, "1gram", 0),
+            ("1", "pilot-v2", one_gram_id, "1gram", 0, 0, "support_floor", 0),
         )
         score_row_count = connection.execute(
             """
@@ -1366,11 +1664,14 @@ def test_candidate_scores_enforce_uniqueness_and_foreign_keys(tmp_path) -> None:
                     score_version,
                     candidate_id,
                     ranking_lane,
+                    passes_support_gate,
+                    passes_quality_gate,
+                    discard_family,
                     is_eligible
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("1", "pilot-v1", 999, "2gram", 0),
+                ("1", "pilot-v1", 999, "2gram", 0, 0, "support_floor", 0),
             )
 
         with pytest.raises(sqlite3.IntegrityError):
@@ -1381,11 +1682,14 @@ def test_candidate_scores_enforce_uniqueness_and_foreign_keys(tmp_path) -> None:
                     score_version,
                     candidate_id,
                     ranking_lane,
+                    passes_support_gate,
+                    passes_quality_gate,
+                    discard_family,
                     is_eligible
                 )
-                VALUES (?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("2", "pilot-v1", two_gram_id, "2gram", 0),
+                ("2", "pilot-v1", two_gram_id, "2gram", 0, 0, "support_floor", 0),
             )
 
     assert score_row_count == 2
@@ -1421,6 +1725,9 @@ def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
                 score_version,
                 candidate_id,
                 ranking_lane,
+                passes_support_gate,
+                passes_quality_gate,
+                discard_family,
                 is_eligible,
                 frequency_score,
                 dispersion_score,
@@ -1430,9 +1737,25 @@ def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
                 final_score,
                 lane_rank
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("1", "pilot-v1", one_gram_id, "1gram", 1, 0.9, 0.8, None, None, 0.0, 0.865, 1),
+            (
+                "1",
+                "pilot-v1",
+                one_gram_id,
+                "1gram",
+                1,
+                1,
+                None,
+                1,
+                0.9,
+                0.8,
+                None,
+                None,
+                0.0,
+                0.865,
+                1,
+            ),
         )
         connection.execute(
             """
@@ -1441,6 +1764,9 @@ def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
                 score_version,
                 candidate_id,
                 ranking_lane,
+                passes_support_gate,
+                passes_quality_gate,
+                discard_family,
                 is_eligible,
                 frequency_score,
                 dispersion_score,
@@ -1450,9 +1776,25 @@ def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
                 final_score,
                 lane_rank
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("1", "pilot-v1", two_gram_id, "2gram", 1, 0.7, 0.6, 0.9, 0.5, 0.1, 0.69, 2),
+            (
+                "1",
+                "pilot-v1",
+                two_gram_id,
+                "2gram",
+                1,
+                1,
+                None,
+                1,
+                0.7,
+                0.6,
+                0.9,
+                0.5,
+                0.1,
+                0.69,
+                2,
+            ),
         )
         connection.execute(
             """
@@ -1461,6 +1803,9 @@ def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
                 score_version,
                 candidate_id,
                 ranking_lane,
+                passes_support_gate,
+                passes_quality_gate,
+                discard_family,
                 is_eligible,
                 frequency_score,
                 dispersion_score,
@@ -1470,9 +1815,25 @@ def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
                 final_score,
                 lane_rank
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            ("1", "pilot-v1", three_gram_id, "3gram", 0, 0.4, 0.5, 0.6, 0.4, 0.0, None, None),
+            (
+                "1",
+                "pilot-v1",
+                three_gram_id,
+                "3gram",
+                0,
+                0,
+                "support_floor",
+                0,
+                0.4,
+                0.5,
+                0.6,
+                0.4,
+                0.0,
+                None,
+                None,
+            ),
         )
         rows = connection.execute(
             """
@@ -1499,12 +1860,15 @@ def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
                     score_version,
                     candidate_id,
                     ranking_lane,
+                    passes_support_gate,
+                    passes_quality_gate,
+                    discard_family,
                     is_eligible,
                     lane_rank
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("1", "pilot-v2", one_gram_id, "1gram", 0, 9),
+                ("1", "pilot-v2", one_gram_id, "1gram", 0, 0, "support_floor", 0, 9),
             )
 
         with pytest.raises(sqlite3.IntegrityError):
@@ -1515,12 +1879,15 @@ def test_candidate_scores_support_lane_semantics(tmp_path) -> None:
                     score_version,
                     candidate_id,
                     ranking_lane,
+                    passes_support_gate,
+                    passes_quality_gate,
+                    discard_family,
                     is_eligible,
                     final_score
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("1", "pilot-v2", three_gram_id, "3gram", 0, 0.2),
+                ("1", "pilot-v2", three_gram_id, "3gram", 0, 0, "support_floor", 0, 0.2),
             )
 
     assert [row["ranking_lane"] for row in rows] == ["1gram", "2gram", "3gram"]
