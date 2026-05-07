@@ -2519,7 +2519,8 @@ validation.
 Step 5A through 5D are implemented through containment schema, deterministic
 refresh, candidate-level inspection, and pilot validation.
 
-Step 6 should now be implemented as explicit substeps `6A` through `6E`.
+Step 6A through 6E are implemented through score schema, eligibility gates,
+stored scoring, lane/global inspection, and pilot validation.
 
 Previous completed target:
 
@@ -2530,13 +2531,13 @@ stable candidate facts -> stored unithood metrics for multiword candidates
 Current completed target:
 
 ```text
-inspectable ranked review surface -> global review surface
+global review surface -> pilot validation
 ```
 
 Next implementation target:
 
 ```text
-global review surface -> pilot validation
+pilot-validated ranked surface -> example selection
 ```
 
 Reason:
@@ -2548,10 +2549,12 @@ Reason:
 - pilot analysis also showed that `show_dispersion` is unusable in the current
   one-show snapshot and that `covered_by_any` is too degenerate for ranking
 - stored `6C` scores now have both lane-first and global inspection surfaces
+- pilot validation confirmed clean score storage, clean lane/global inspection,
+  and deterministic reruns on the current snapshot
 - live ranked data also showed that the global list starts heavily
   `1gram`-weighted but gradually shifts toward more multiword material, which
   may be a feature rather than a bug
 - splitting `6D` into lane-first inspection first and global inspection second
   kept the read surface reviewable without imposing extra composition policy
 
-Next step: Step 6E, Pilot Validation.
+Next step: Step 7, Example Selection.
