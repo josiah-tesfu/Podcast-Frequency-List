@@ -124,6 +124,21 @@ Use it when:
 - feed is already known
 - manual feed flow is the project standard
 
+Saved feed set for the next multi-show corpus pass:
+
+```bash
+uv run podfreq add-show "https://feeds.360.audion.fm/Wmd7d5HyZ8wJGI3zZVaUq" --title "Zack en roue libre" --language fr --bucket native
+uv run podfreq add-show "https://feeds.audiomeans.fr/feed/f57a29ac-5ce1-423d-8ca2-82369d9ca230.xml" --title "Small Talk - Konbini" --language fr --bucket native
+uv run podfreq add-show "https://feeds.acast.com/public/shows/un-bon-moment" --title "Un Bon Moment" --language fr --bucket native
+uv run podfreq add-show "https://feeds.acast.com/public/shows/a8879bdf-de58-4537-8dab-a3bb13948786" --title "À bientôt de te revoir" --language fr --bucket native
+uv run podfreq add-show "https://feeds.acast.com/public/shows/lesgensquidoutent" --title "Les Gens Qui Doutent" --language fr --bucket native
+uv run podfreq add-show "https://feeds.acast.com/public/shows/floodcast" --title "FloodCast" --language fr --bucket native
+uv run podfreq add-show "https://feeds.acast.com/public/shows/legend-1" --title "LEGEND" --language fr --bucket native
+uv run podfreq add-show "https://feeds.acast.com/public/shows/we-love-tftc" --title "TFTC - Le Podcast" --language fr --bucket native
+uv run podfreq add-show "https://feeds.acast.com/public/shows/6234700f7849430013a516af" --title "Contre Soirée par AnnaRvr" --language fr --bucket native
+uv run podfreq add-show "https://feeds.audiomeans.fr/feed/f7d9e2d0-ea10-4e9c-bed3-81782edf36d6.xml" --title "La Leçon" --language fr --bucket native
+```
+
 ### `sync-feed`
 
 What it does:
