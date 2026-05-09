@@ -12,7 +12,7 @@ from podcast_frequency_list.discovery import DEFAULT_USER_AGENT, ShowDiscoverySe
 from podcast_frequency_list.discovery.feed_verifier import FeedVerifier
 from podcast_frequency_list.ingest import RssFeedClient, SyncFeedService
 from podcast_frequency_list.normalize import TranscriptNormalizationService
-from podcast_frequency_list.pilot import PilotSelectionService
+from podcast_frequency_list.pilot import CorpusStatusService, PilotSelectionService
 from podcast_frequency_list.qc import SegmentQcService
 from podcast_frequency_list.sentences import SentenceSplitService
 from podcast_frequency_list.tokens import (
@@ -42,6 +42,11 @@ def build_sync_feed_service() -> SyncFeedService:
 def build_pilot_selection_service() -> PilotSelectionService:
     settings = load_settings()
     return PilotSelectionService(db_path=settings.db_path)
+
+
+def build_corpus_status_service() -> CorpusStatusService:
+    settings = load_settings()
+    return CorpusStatusService(db_path=settings.db_path, asr_model=settings.asr_model)
 
 
 def build_asr_run_service() -> AsrRunService:

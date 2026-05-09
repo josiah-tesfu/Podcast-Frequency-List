@@ -9,7 +9,7 @@ from podcast_frequency_list.cli.commands.execution import (
 )
 from podcast_frequency_list.discovery import FeedVerificationError
 from podcast_frequency_list.ingest import RssFeedError, SyncFeedError
-from podcast_frequency_list.pilot import PilotSelectionError
+from podcast_frequency_list.pilot import CorpusStatusError, PilotSelectionError
 
 
 def add_show(
@@ -67,8 +67,19 @@ def create_pilot(
     )
 
 
+def inspect_corpus() -> None:
+    run_service_method(
+        service_factory_name="build_corpus_status_service",
+        handled_errors=CorpusStatusError,
+        emitter=emitters.emit_corpus_status_result,
+        method_name="inspect",
+        method_kwargs={},
+    )
+
+
 COMMANDS: tuple[tuple[str, CommandCallback], ...] = (
     ("add-show", add_show),
     ("sync-feed", sync_feed),
     ("create-pilot", create_pilot),
+    ("inspect-corpus", inspect_corpus),
 )

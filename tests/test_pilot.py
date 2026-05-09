@@ -1,5 +1,9 @@
 from podcast_frequency_list.db import bootstrap_database, connect, upsert_episode, upsert_show
-from podcast_frequency_list.pilot import PilotSelectionError, PilotSelectionService
+from podcast_frequency_list.pilot import (
+    CorpusStatusService,
+    PilotSelectionError,
+    PilotSelectionService,
+)
 
 
 def _seed_show(connection) -> int:
@@ -210,3 +214,114 @@ def test_pilot_selection_errors_when_show_missing(tmp_path) -> None:
         assert "show_id 999 not found" in str(exc)
     else:
         raise AssertionError("expected PilotSelectionError")
+
+
+def test_corpus_status_reports_show_and_slice_progress(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_one_id = _seed_show(connection)
+        show_two_id = upsert_show(
+            connection,
+            title="FloodCast",
+            feed_url="https://example.com/floodcast.xml",
+        )
+        upsert_episode(
+            connection,
+            show_id=show_one_id,
+            guid="ep-1",
+            title="Episode 1",
+            published_at="2025-01-03T00:00:00+00:00",
+            audio_url="https://cdn.example.com/ep1.mp3",
+            duration_seconds=3_600,
+            has_transcript_tag=True,
+        )
+        upsert_episode(
+            connection,
+            show_id=show_one_id,
+            guid="ep-2",
+            title="Episode 2",
+            published_at="2025-01-02T00:00:00+00:00",
+            audio_url="https://cdn.example.com/ep2.mp3",
+            duration_seconds=1_800,
+        )
+        upsert_episode(
+            connection,
+            show_id=show_two_id,
+            guid="ep-3",
+            title="Episode 3",
+            published_at="2025-01-01T00:00:00+00:00",
+            audio_url="https://cdn.example.com/ep3.mp3",
+            duration_seconds=2_700,
+        )
+        connection.commit()
+
+    selection_service = PilotSelectionService(db_path=db_path)
+    result = selection_service.create_pilot(
+        show_id=show_one_id,
+        name="zack-10h-slice",
+        target_seconds=5_400,
+    )
+
+    with connect(db_path) as connection:
+        episode_rows = connection.execute(
+            """
+            SELECT episode_id, guid
+            FROM episodes
+            WHERE show_id = ?
+            ORDER BY guid
+            """,
+            (show_one_id,),
+        ).fetchall()
+        episode_ids = {row["guid"]: int(row["episode_id"]) for row in episode_rows}
+        connection.execute(
+            """
+            UPDATE transcript_sources
+            SET status = 'ready'
+            WHERE episode_id = ?
+            AND source_type = 'asr'
+            AND model = 'gpt-4o-mini-transcribe'
+            """,
+            (episode_ids["ep-1"],),
+        )
+        connection.execute(
+            """
+            UPDATE transcript_sources
+            SET status = 'failed'
+            WHERE episode_id = ?
+            AND source_type = 'asr'
+            AND model = 'gpt-4o-mini-transcribe'
+            """,
+            (episode_ids["ep-2"],),
+        )
+        connection.commit()
+
+    status_service = CorpusStatusService(db_path=db_path)
+    status = status_service.inspect()
+
+    assert status.show_count == 2
+    assert status.slice_count == 1
+    assert status.episode_count == 3
+    assert status.total_seconds == 8_100
+    assert status.episodes_with_transcript_tag == 1
+    assert status.selected_slice_episodes == 2
+    assert status.selected_slice_seconds == 5_400
+    assert status.needs_asr_episodes == 0
+    assert status.in_progress_asr_episodes == 0
+    assert status.ready_asr_episodes == 1
+    assert status.failed_asr_episodes == 1
+
+    slice_row = next(row for row in status.rows if row.slice_id == result.pilot_run_id)
+    assert slice_row.title == "Zack en Roue Libre by Zack Nani"
+    assert slice_row.slice_name == "zack-10h-slice"
+    assert slice_row.selected_episodes == 2
+    assert slice_row.selected_seconds == 5_400
+    assert slice_row.ready_asr_episodes == 1
+    assert slice_row.failed_asr_episodes == 1
+
+    no_slice_row = next(row for row in status.rows if row.show_id == show_two_id)
+    assert no_slice_row.slice_id is None
+    assert no_slice_row.slice_name is None
+    assert no_slice_row.selected_episodes == 0
+    assert no_slice_row.ready_asr_episodes == 0

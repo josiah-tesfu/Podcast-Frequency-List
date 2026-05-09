@@ -21,7 +21,7 @@ from podcast_frequency_list.cli.output import emit_fields, emit_inline_fields, e
 from podcast_frequency_list.discovery.models import SavedShow
 from podcast_frequency_list.ingest import SyncFeedResult
 from podcast_frequency_list.normalize import NormalizationRunResult
-from podcast_frequency_list.pilot import PilotSelectionResult
+from podcast_frequency_list.pilot import CorpusStatusResult, PilotSelectionResult
 from podcast_frequency_list.qc import QcRunResult
 from podcast_frequency_list.sentences import SentenceSplitResult
 from podcast_frequency_list.tokens import (
@@ -44,6 +44,45 @@ def emit_sync_result(result: SyncFeedResult) -> None:
 
 def emit_pilot_result(result: PilotSelectionResult) -> None:
     _emit_result_fields(result, PILOT_RESULT_FIELDS)
+
+
+def emit_corpus_status_result(result: CorpusStatusResult) -> None:
+    emit_fields(
+        (
+            ("show_count", result.show_count),
+            ("slice_count", result.slice_count),
+            ("episode_count", result.episode_count),
+            ("total_hours", f"{result.total_seconds / 3600:.2f}"),
+            ("episodes_with_transcript_tag", result.episodes_with_transcript_tag),
+            ("selected_slice_episodes", result.selected_slice_episodes),
+            ("selected_slice_hours", f"{result.selected_slice_seconds / 3600:.2f}"),
+            ("needs_asr_episodes", result.needs_asr_episodes),
+            ("in_progress_asr_episodes", result.in_progress_asr_episodes),
+            ("ready_asr_episodes", result.ready_asr_episodes),
+            ("failed_asr_episodes", result.failed_asr_episodes),
+        )
+    )
+    for row in result.rows:
+        emit_record(
+            (
+                ("record", "show_status"),
+                ("show_id", row.show_id),
+                ("title", row.title),
+                ("feed_url", row.feed_url),
+                ("episode_count", row.episode_count),
+                ("total_hours", f"{row.total_seconds / 3600:.2f}"),
+                ("episodes_with_transcript_tag", row.episodes_with_transcript_tag),
+                ("slice_id", row.slice_id if row.slice_id is not None else "-"),
+                ("slice_name", row.slice_name or "-"),
+                ("slice_selection_order", row.slice_selection_order or "-"),
+                ("selected_episodes", row.selected_episodes),
+                ("selected_hours", f"{row.selected_seconds / 3600:.2f}"),
+                ("needs_asr_episodes", row.needs_asr_episodes),
+                ("in_progress_asr_episodes", row.in_progress_asr_episodes),
+                ("ready_asr_episodes", row.ready_asr_episodes),
+                ("failed_asr_episodes", row.failed_asr_episodes),
+            )
+        )
 
 
 def emit_asr_episode_result(result: AsrEpisodeResult) -> None:

@@ -8,7 +8,12 @@ from podcast_frequency_list.config import load_settings
 from podcast_frequency_list.discovery.models import SavedShow
 from podcast_frequency_list.ingest.models import SyncFeedResult
 from podcast_frequency_list.normalize.models import NormalizationRunResult
-from podcast_frequency_list.pilot.models import PilotEpisode, PilotSelectionResult
+from podcast_frequency_list.pilot.models import (
+    CorpusStatusResult,
+    CorpusStatusRow,
+    PilotEpisode,
+    PilotSelectionResult,
+)
 from podcast_frequency_list.qc.models import QcRunResult
 from podcast_frequency_list.sentences.models import SentenceSplitResult
 from podcast_frequency_list.tokens import CandidateInventoryError
@@ -114,6 +119,59 @@ class FakePilotSelectionService:
                     published_at="2025-02-01T00:00:00+00:00",
                     duration_seconds=9_000,
                     cumulative_seconds=9_000,
+                ),
+            ),
+        )
+
+
+class FakeCorpusStatusService:
+    def inspect(self) -> CorpusStatusResult:
+        return CorpusStatusResult(
+            show_count=2,
+            slice_count=1,
+            episode_count=14,
+            total_seconds=52_200,
+            episodes_with_transcript_tag=3,
+            selected_slice_episodes=4,
+            selected_slice_seconds=14_400,
+            needs_asr_episodes=2,
+            in_progress_asr_episodes=1,
+            ready_asr_episodes=1,
+            failed_asr_episodes=0,
+            rows=(
+                CorpusStatusRow(
+                    show_id=1,
+                    title="Zack en Roue Libre by Zack Nani",
+                    feed_url="https://example.com/zack.xml",
+                    episode_count=10,
+                    total_seconds=36_000,
+                    episodes_with_transcript_tag=2,
+                    slice_id=3,
+                    slice_name="zack-10h-slice",
+                    slice_selection_order="newest",
+                    selected_episodes=4,
+                    selected_seconds=14_400,
+                    needs_asr_episodes=2,
+                    in_progress_asr_episodes=1,
+                    ready_asr_episodes=1,
+                    failed_asr_episodes=0,
+                ),
+                CorpusStatusRow(
+                    show_id=2,
+                    title="FloodCast",
+                    feed_url="https://example.com/floodcast.xml",
+                    episode_count=4,
+                    total_seconds=16_200,
+                    episodes_with_transcript_tag=1,
+                    slice_id=None,
+                    slice_name=None,
+                    slice_selection_order=None,
+                    selected_episodes=0,
+                    selected_seconds=0,
+                    needs_asr_episodes=0,
+                    in_progress_asr_episodes=0,
+                    ready_asr_episodes=0,
+                    failed_asr_episodes=0,
                 ),
             ),
         )
@@ -798,6 +856,48 @@ def test_create_pilot_prints_stats(tmp_path, monkeypatch) -> None:
     assert fake_service.name == "zack-10h-pilot"
     assert fake_service.target_seconds == 36_000
     assert fake_service.selection_order == "newest"
+
+    load_settings.cache_clear()
+
+
+def test_inspect_corpus_prints_show_and_slice_status(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakeCorpusStatusService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_corpus_status_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(app, ["inspect-corpus"])
+
+    assert result.exit_code == 0
+    assert "show_count=2" in result.stdout
+    assert "slice_count=1" in result.stdout
+    assert "total_hours=14.50" in result.stdout
+    assert "selected_slice_hours=4.00" in result.stdout
+    assert "needs_asr_episodes=2" in result.stdout
+    assert (
+        "record=show_status\tshow_id=1\ttitle=Zack en Roue Libre by Zack Nani"
+        "\tfeed_url=https://example.com/zack.xml\tepisode_count=10\ttotal_hours=10.00"
+        "\tepisodes_with_transcript_tag=2\tslice_id=3\tslice_name=zack-10h-slice"
+        "\tslice_selection_order=newest\tselected_episodes=4\tselected_hours=4.00"
+        "\tneeds_asr_episodes=2\tin_progress_asr_episodes=1\tready_asr_episodes=1"
+        "\tfailed_asr_episodes=0"
+        in result.stdout
+    )
+    assert (
+        "record=show_status\tshow_id=2\ttitle=FloodCast"
+        "\tfeed_url=https://example.com/floodcast.xml\tepisode_count=4\ttotal_hours=4.50"
+        "\tepisodes_with_transcript_tag=1\tslice_id=-\tslice_name=-"
+        "\tslice_selection_order=-\tselected_episodes=0\tselected_hours=0.00"
+        "\tneeds_asr_episodes=0\tin_progress_asr_episodes=0\tready_asr_episodes=0"
+        "\tfailed_asr_episodes=0"
+        in result.stdout
+    )
 
     load_settings.cache_clear()
 
