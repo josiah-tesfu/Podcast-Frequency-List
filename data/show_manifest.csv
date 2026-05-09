@@ -1,0 +1,11 @@
+slug,title,feed_url,language,bucket,family,target_hours,selection_order,enabled,notes
+zack-en-roue-libre,Zack en Roue Libre,https://feeds.360.audion.fm/Wmd7d5HyZ8wJGI3zZVaUq,fr,native,culture-interview,10,newest,1,baseline show
+small-talk-konbini,Small Talk - Konbini,https://feeds.audiomeans.fr/feed/f57a29ac-5ce1-423d-8ca2-82369d9ca230.xml,fr,native,culture-interview,10,newest,1,close fit to Zack
+un-bon-moment,Un Bon Moment,https://feeds.acast.com/public/shows/un-bon-moment,fr,native,comedy-casual,10,newest,1,long relaxed conversation
+a-bientot-de-te-revoir,À bientôt de te revoir,https://feeds.acast.com/public/shows/a8879bdf-de58-4537-8dab-a3bb13948786,fr,native,culture-interview,10,newest,1,casual interview register
+les-gens-qui-doutent,Les Gens Qui Doutent,https://feeds.acast.com/public/shows/lesgensquidoutent,fr,native,culture-interview,10,newest,1,artists and culture guests
+floodcast,FloodCast,https://feeds.acast.com/public/shows/floodcast,fr,native,comedy-casual,10,newest,1,high casual spoken value
+legend,LEGEND,https://feeds.acast.com/public/shows/legend-1,fr,native,broad-conversation,10,newest,1,filter later toward culture and creator guests
+tftc-le-podcast,TFTC - Le Podcast,https://feeds.acast.com/public/shows/we-love-tftc,fr,native,broad-conversation,10,newest,1,keep casual creator interviews
+contre-soiree,Contre Soirée par AnnaRvr,https://feeds.acast.com/public/shows/6234700f7849430013a516af,fr,native,comedy-casual,10,newest,1,strong informal speech
+la-lecon,La Leçon,https://feeds.audiomeans.fr/feed/f7d9e2d0-ea10-4e9c-bed3-81782edf36d6.xml,fr,native,broad-conversation,10,newest,1,keep guest-driven episodes
