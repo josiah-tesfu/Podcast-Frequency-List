@@ -50,6 +50,7 @@ def create_pilot(
     name: str = typer.Option(..., "--name"),
     hours: float = typer.Option(10.0, "--hours", min=0.1),
     selection_order: str = typer.Option("newest", "--selection-order"),
+    min_duration_minutes: float | None = typer.Option(None, "--min-duration-minutes", min=0.1),
     notes: str | None = typer.Option(None, "--notes"),
 ) -> None:
     run_service_method(
@@ -62,6 +63,9 @@ def create_pilot(
             "name": name,
             "target_seconds": round(hours * 3600),
             "selection_order": selection_order,
+            "min_duration_seconds": (
+                round(min_duration_minutes * 60) if min_duration_minutes is not None else None
+            ),
             "notes": notes,
         },
     )

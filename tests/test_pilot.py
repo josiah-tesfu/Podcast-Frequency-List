@@ -131,6 +131,89 @@ def test_pilot_selection_skips_missing_audio_or_duration(tmp_path) -> None:
     assert result.episodes[0].title == "Valid"
 
 
+def test_pilot_selection_skips_teaser_and_best_of_titles(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = _seed_show(connection)
+        upsert_episode(
+            connection,
+            show_id=show_id,
+            guid="ep-teaser",
+            title="Teaser - bientôt",
+            audio_url="https://cdn.example.com/teaser.mp3",
+            duration_seconds=3_600,
+        )
+        upsert_episode(
+            connection,
+            show_id=show_id,
+            guid="ep-best-of",
+            title="Best of 2024",
+            audio_url="https://cdn.example.com/best-of.mp3",
+            duration_seconds=3_600,
+        )
+        upsert_episode(
+            connection,
+            show_id=show_id,
+            guid="ep-main",
+            title="Conversation principale",
+            audio_url="https://cdn.example.com/main.mp3",
+            duration_seconds=3_600,
+        )
+        connection.commit()
+
+    service = PilotSelectionService(db_path=db_path)
+
+    result = service.create_pilot(
+        show_id=show_id,
+        name="zack-title-filter-test",
+        target_seconds=3_600,
+    )
+
+    assert result.selected_count == 1
+    assert result.skipped_count == 2
+    assert result.episodes[0].title == "Conversation principale"
+
+
+def test_pilot_selection_applies_optional_min_duration_floor(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        show_id = _seed_show(connection)
+        upsert_episode(
+            connection,
+            show_id=show_id,
+            guid="ep-short",
+            title="Episode court",
+            audio_url="https://cdn.example.com/short.mp3",
+            duration_seconds=1_200,
+        )
+        upsert_episode(
+            connection,
+            show_id=show_id,
+            guid="ep-long",
+            title="Episode long",
+            audio_url="https://cdn.example.com/long.mp3",
+            duration_seconds=2_400,
+        )
+        connection.commit()
+
+    service = PilotSelectionService(db_path=db_path)
+
+    result = service.create_pilot(
+        show_id=show_id,
+        name="zack-duration-floor-test",
+        target_seconds=2_400,
+        min_duration_seconds=1_800,
+    )
+
+    assert result.selected_count == 1
+    assert result.skipped_count == 1
+    assert result.episodes[0].title == "Episode long"
+
+
 def test_pilot_selection_replaces_existing_run_without_clobbering_ready_source(
     tmp_path,
 ) -> None:

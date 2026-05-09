@@ -82,6 +82,7 @@ class FakePilotSelectionService:
         self.name: str | None = None
         self.target_seconds: int | None = None
         self.selection_order: str | None = None
+        self.min_duration_seconds: int | None = None
         self.notes: str | None = None
 
     def create_pilot(
@@ -91,12 +92,14 @@ class FakePilotSelectionService:
         name: str,
         target_seconds: int,
         selection_order: str = "newest",
+        min_duration_seconds: int | None = None,
         notes: str | None = None,
     ) -> PilotSelectionResult:
         self.show_id = show_id
         self.name = name
         self.target_seconds = target_seconds
         self.selection_order = selection_order
+        self.min_duration_seconds = min_duration_seconds
         self.notes = notes
         return PilotSelectionResult(
             pilot_run_id=3,
@@ -856,6 +859,40 @@ def test_create_pilot_prints_stats(tmp_path, monkeypatch) -> None:
     assert fake_service.name == "zack-10h-pilot"
     assert fake_service.target_seconds == 36_000
     assert fake_service.selection_order == "newest"
+    assert fake_service.min_duration_seconds is None
+
+    load_settings.cache_clear()
+
+
+def test_create_pilot_accepts_min_duration_minutes(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("RAW_DATA_DIR", str(tmp_path / "raw"))
+    monkeypatch.setenv("PROCESSED_DATA_DIR", str(tmp_path / "processed"))
+    load_settings.cache_clear()
+
+    fake_service = FakePilotSelectionService()
+    monkeypatch.setattr(
+        "podcast_frequency_list.cli.build_pilot_selection_service",
+        lambda: fake_service,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "create-pilot",
+            "--show-id",
+            "1",
+            "--name",
+            "zack-10h-slice",
+            "--hours",
+            "10",
+            "--min-duration-minutes",
+            "20",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert fake_service.min_duration_seconds == 1_200
 
     load_settings.cache_clear()
 

@@ -5,6 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from podcast_frequency_list.db import connect, get_show_by_id, upsert_transcript_source
+from podcast_frequency_list.discovery.common import normalize_text
 from podcast_frequency_list.pilot.models import (
     CorpusStatusResult,
     CorpusStatusRow,
@@ -14,6 +15,15 @@ from podcast_frequency_list.pilot.models import (
 
 DEFAULT_ASR_MODEL = "gpt-4o-mini-transcribe"
 DEFAULT_ASR_COST_PER_MINUTE_USD = 0.003
+_EXCLUDED_TITLE_PATTERNS = (
+    "teaser",
+    "trailer",
+    "bande annonce",
+    "extrait",
+    "best of",
+    "rediff",
+    "replay",
+)
 
 
 class PilotSelectionError(RuntimeError):
@@ -43,12 +53,15 @@ class PilotSelectionService:
         name: str,
         target_seconds: int,
         selection_order: str = "newest",
+        min_duration_seconds: int | None = None,
         notes: str | None = None,
     ) -> PilotSelectionResult:
         if target_seconds <= 0:
             raise PilotSelectionError("target_seconds must be positive")
         if selection_order not in {"newest", "oldest"}:
             raise PilotSelectionError("selection_order must be newest or oldest")
+        if min_duration_seconds is not None and min_duration_seconds <= 0:
+            raise PilotSelectionError("min_duration_seconds must be positive when provided")
 
         order_sql = "DESC" if selection_order == "newest" else "ASC"
 
@@ -57,39 +70,33 @@ class PilotSelectionService:
             if show is None:
                 raise PilotSelectionError(f"show_id {show_id} not found")
 
-            skipped_count = connection.execute(
-                """
-                SELECT COUNT(*)
-                FROM episodes
-                WHERE show_id = ?
-                AND (
-                    audio_url IS NULL
-                    OR audio_url = ''
-                    OR duration_seconds IS NULL
-                    OR duration_seconds <= 0
-                )
-                """,
-                (show_id,),
-            ).fetchone()[0]
-
             rows = connection.execute(
                 f"""
-                SELECT episode_id, title, published_at, duration_seconds
+                SELECT episode_id, title, published_at, audio_url, duration_seconds
                 FROM episodes
                 WHERE show_id = ?
-                AND audio_url IS NOT NULL
-                AND audio_url != ''
-                AND duration_seconds IS NOT NULL
-                AND duration_seconds > 0
                 ORDER BY published_at {order_sql}, episode_id {order_sql}
                 """,
                 (show_id,),
             ).fetchall()
 
+            eligible_rows: list[sqlite3.Row] = []
+            skipped_count = 0
+            for row in rows:
+                if not _is_episode_eligible(
+                    title=str(row["title"]),
+                    audio_url=row["audio_url"],
+                    duration_seconds=row["duration_seconds"],
+                    min_duration_seconds=min_duration_seconds,
+                ):
+                    skipped_count += 1
+                    continue
+                eligible_rows.append(row)
+
             selected: list[PilotEpisode] = []
             cumulative_seconds = 0
 
-            for row in rows:
+            for row in eligible_rows:
                 cumulative_seconds += int(row["duration_seconds"])
                 selected.append(
                     PilotEpisode(
@@ -360,3 +367,21 @@ class CorpusStatusService:
             failed_asr_episodes=sum(int(row["failed_asr_episodes"]) for row in slice_rows),
             rows=tuple(rows),
         )
+
+
+def _is_episode_eligible(
+    *,
+    title: str,
+    audio_url: str | None,
+    duration_seconds: int | None,
+    min_duration_seconds: int | None,
+) -> bool:
+    if audio_url is None or audio_url == "":
+        return False
+    if duration_seconds is None or duration_seconds <= 0:
+        return False
+    if min_duration_seconds is not None and duration_seconds < min_duration_seconds:
+        return False
+
+    normalized_title = normalize_text(title)
+    return not any(pattern in normalized_title for pattern in _EXCLUDED_TITLE_PATTERNS)
