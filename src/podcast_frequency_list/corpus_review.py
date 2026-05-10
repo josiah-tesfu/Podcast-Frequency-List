@@ -54,10 +54,10 @@ class CorpusDispersionRow:
 @dataclass(frozen=True)
 class CorpusMilestoneReviewResult:
     metrics_result: CandidateMetricsResult
-    metrics_validation: CandidateMetricsValidationResult
-    metrics_is_deterministic: bool
+    metrics_validation: CandidateMetricsValidationResult | None
+    metrics_is_deterministic: bool | None
     scores_result: CandidateScoresResult
-    scores_is_deterministic: bool
+    scores_is_deterministic: bool | None
     middle_offset: int
     tail_offset: int
     dispersion_rows: tuple[CorpusDispersionRow, ...]
@@ -91,28 +91,52 @@ class CorpusMilestoneReviewService:
         limit: int = DEFAULT_REVIEW_LIMIT,
         inventory_version: str = INVENTORY_VERSION,
         score_version: str = SCORE_VERSION,
+        refresh_first: bool = False,
+        check_determinism: bool = False,
+        validate_metrics: bool = False,
     ) -> CorpusMilestoneReviewResult:
         if limit < 1:
             raise CorpusMilestoneReviewError("limit must be positive")
 
-        metrics_result = self.candidate_metrics_service.refresh(
-            inventory_version=inventory_version
-        )
-        metrics_validation = self.candidate_metrics_service.validate(
-            inventory_version=inventory_version
-        )
-        repeated_metrics_result = self.candidate_metrics_service.refresh(
-            inventory_version=inventory_version
-        )
+        if check_determinism:
+            refresh_first = True
 
-        scores_result = self.candidate_scores_service.refresh(
-            inventory_version=inventory_version,
-            score_version=score_version,
-        )
-        repeated_scores_result = self.candidate_scores_service.refresh(
-            inventory_version=inventory_version,
-            score_version=score_version,
-        )
+        if refresh_first:
+            metrics_result = self.candidate_metrics_service.refresh(
+                inventory_version=inventory_version
+            )
+            repeated_metrics_result = None
+            if check_determinism:
+                repeated_metrics_result = self.candidate_metrics_service.refresh(
+                    inventory_version=inventory_version
+                )
+
+            scores_result = self.candidate_scores_service.refresh(
+                inventory_version=inventory_version,
+                score_version=score_version,
+            )
+            repeated_scores_result = None
+            if check_determinism:
+                repeated_scores_result = self.candidate_scores_service.refresh(
+                    inventory_version=inventory_version,
+                    score_version=score_version,
+                )
+        else:
+            metrics_result = self.candidate_metrics_service.summarize(
+                inventory_version=inventory_version
+            )
+            repeated_metrics_result = None
+            scores_result = self.candidate_scores_service.summarize(
+                inventory_version=inventory_version,
+                score_version=score_version,
+            )
+            repeated_scores_result = None
+
+        metrics_validation = None
+        if validate_metrics:
+            metrics_validation = self.candidate_metrics_service.validate(
+                inventory_version=inventory_version
+            )
 
         eligible_candidates = scores_result.eligible_candidates
         middle_offset = max((eligible_candidates // 2) - (limit // 2), 0)
@@ -121,9 +145,17 @@ class CorpusMilestoneReviewService:
         return CorpusMilestoneReviewResult(
             metrics_result=metrics_result,
             metrics_validation=metrics_validation,
-            metrics_is_deterministic=metrics_result == repeated_metrics_result,
+            metrics_is_deterministic=(
+                metrics_result == repeated_metrics_result
+                if repeated_metrics_result is not None
+                else None
+            ),
             scores_result=scores_result,
-            scores_is_deterministic=scores_result == repeated_scores_result,
+            scores_is_deterministic=(
+                scores_result == repeated_scores_result
+                if repeated_scores_result is not None
+                else None
+            ),
             middle_offset=middle_offset,
             tail_offset=tail_offset,
             dispersion_rows=self._load_dispersion_rows(

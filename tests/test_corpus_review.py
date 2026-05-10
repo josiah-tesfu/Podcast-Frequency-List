@@ -142,6 +142,25 @@ def _row(candidate_key: str, ngram_size: int, final_score: float) -> CandidateSu
 class _FakeCandidateMetricsService:
     def __init__(self) -> None:
         self.refresh_calls = 0
+        self.summarize_calls = 0
+        self.validate_calls = 0
+
+    def summarize(
+        self, *, inventory_version: str = INVENTORY_VERSION
+    ) -> CandidateMetricsResult:
+        assert inventory_version == INVENTORY_VERSION
+        self.summarize_calls += 1
+        return CandidateMetricsResult(
+            inventory_version=inventory_version,
+            selected_candidates=4,
+            refreshed_candidates=4,
+            deleted_orphan_candidates=0,
+            occurrence_count=20,
+            raw_frequency_total=40,
+            episode_dispersion_total=12,
+            show_dispersion_total=8,
+            display_text_updates=0,
+        )
 
     def refresh(self, *, inventory_version: str = INVENTORY_VERSION) -> CandidateMetricsResult:
         assert inventory_version == INVENTORY_VERSION
@@ -162,6 +181,7 @@ class _FakeCandidateMetricsService:
         self, *, inventory_version: str = INVENTORY_VERSION
     ) -> CandidateMetricsValidationResult:
         assert inventory_version == INVENTORY_VERSION
+        self.validate_calls += 1
         return CandidateMetricsValidationResult(
             inventory_version=inventory_version,
             candidate_count=4,
@@ -177,11 +197,34 @@ class _FakeCandidateMetricsService:
 class _FakeCandidateScoresService:
     def __init__(self) -> None:
         self.refresh_calls = 0
+        self.summarize_calls = 0
         self.rows = (
             _row("alpha", 1, 0.95),
             _row("beta", 2, 0.80),
             _row("gamma", 3, 0.60),
             _row("delta", 2, 0.40),
+        )
+
+    def summarize(
+        self,
+        *,
+        inventory_version: str = INVENTORY_VERSION,
+        score_version: str = SCORE_VERSION,
+    ) -> CandidateScoresResult:
+        assert inventory_version == INVENTORY_VERSION
+        assert score_version == SCORE_VERSION
+        self.summarize_calls += 1
+        return CandidateScoresResult(
+            inventory_version=inventory_version,
+            score_version=score_version,
+            selected_candidates=4,
+            stored_candidates=4,
+            support_pass_candidates=4,
+            quality_pass_candidates=4,
+            eligible_candidates=4,
+            eligible_1gram_candidates=1,
+            eligible_2gram_candidates=2,
+            eligible_3gram_candidates=1,
         )
 
     def refresh(
@@ -231,7 +274,7 @@ class _FakeCandidateScoresService:
         return tuple(row for row in self.rows if row.candidate_key in wanted)
 
 
-def test_corpus_milestone_review_runs_refreshes_and_builds_review_windows(tmp_path: Path) -> None:
+def test_corpus_milestone_review_defaults_to_inspect_only(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)
 
@@ -280,8 +323,92 @@ def test_corpus_milestone_review_runs_refreshes_and_builds_review_windows(tmp_pa
 
     result = service.review(limit=2)
 
+    assert metrics_service.summarize_calls == 1
+    assert scores_service.summarize_calls == 1
+    assert metrics_service.refresh_calls == 0
+    assert scores_service.refresh_calls == 0
+    assert metrics_service.validate_calls == 0
+    assert result.metrics_validation is None
+    assert result.metrics_is_deterministic is None
+    assert result.scores_is_deterministic is None
+    assert result.middle_offset == 1
+    assert result.tail_offset == 2
+    assert tuple(row.candidate_key for row in result.top_rows) == ("alpha", "beta")
+    assert tuple(row.candidate_key for row in result.middle_rows) == ("beta", "gamma")
+    assert tuple(row.candidate_key for row in result.tail_rows) == ("gamma", "delta")
+
+    dispersion_rows = {row.ngram_size: row for row in result.dispersion_rows}
+    assert dispersion_rows[1].total_candidates == 1
+    assert dispersion_rows[1].multi_show_candidates == 0
+    assert dispersion_rows[2].total_candidates == 2
+    assert dispersion_rows[2].multi_show_candidates == 2
+    assert dispersion_rows[2].cross_show_3plus_candidates == 1
+    assert dispersion_rows[2].eligible_candidates == 1
+    assert dispersion_rows[2].eligible_multi_show_candidates == 1
+    assert dispersion_rows[3].eligible_candidates == 1
+
+
+def test_corpus_milestone_review_refresh_mode_supports_determinism_and_validation(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_id=1,
+            candidate_key="alpha",
+            ngram_size=1,
+            show_dispersion=1,
+        )
+        _insert_candidate(
+            connection,
+            candidate_id=2,
+            candidate_key="beta",
+            ngram_size=2,
+            show_dispersion=2,
+        )
+        _insert_candidate(
+            connection,
+            candidate_id=3,
+            candidate_key="gamma",
+            ngram_size=2,
+            show_dispersion=3,
+        )
+        _insert_candidate(
+            connection,
+            candidate_id=4,
+            candidate_key="delta",
+            ngram_size=3,
+            show_dispersion=2,
+        )
+        _insert_candidate_score(connection, candidate_id=1, ranking_lane="1gram", is_eligible=1)
+        _insert_candidate_score(connection, candidate_id=2, ranking_lane="2gram", is_eligible=1)
+        _insert_candidate_score(connection, candidate_id=3, ranking_lane="2gram", is_eligible=0)
+        _insert_candidate_score(connection, candidate_id=4, ranking_lane="3gram", is_eligible=1)
+        connection.commit()
+
+    metrics_service = _FakeCandidateMetricsService()
+    scores_service = _FakeCandidateScoresService()
+    service = CorpusMilestoneReviewService(
+        db_path=db_path,
+        candidate_metrics_service=metrics_service,
+        candidate_scores_service=scores_service,
+    )
+
+    result = service.review(
+        limit=2,
+        refresh_first=True,
+        check_determinism=True,
+        validate_metrics=True,
+    )
+
     assert metrics_service.refresh_calls == 2
     assert scores_service.refresh_calls == 2
+    assert metrics_service.summarize_calls == 0
+    assert scores_service.summarize_calls == 0
+    assert metrics_service.validate_calls == 1
     assert result.metrics_is_deterministic is True
     assert result.scores_is_deterministic is True
     assert result.middle_offset == 1

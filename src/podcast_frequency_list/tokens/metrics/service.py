@@ -29,6 +29,19 @@ class CandidateMetricsService:
     def __init__(self, *, db_path: Path) -> None:
         self.db_path = db_path
 
+    def summarize(
+        self,
+        *,
+        inventory_version: str = INVENTORY_VERSION,
+    ) -> CandidateMetricsResult:
+        with connect(self.db_path) as connection:
+            workflow = _CandidateMetricsWorkflow(
+                connection=connection,
+                inventory_version=inventory_version,
+            )
+            selected_candidates = workflow.count_candidates()
+            return workflow.summarize(selected_candidates=selected_candidates)
+
     def list_candidates_by_key(
         self,
         *,

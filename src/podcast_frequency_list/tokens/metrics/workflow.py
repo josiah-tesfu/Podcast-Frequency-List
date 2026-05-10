@@ -53,6 +53,20 @@ class _CandidateMetricsWorkflow:
     def count_candidates(self) -> int:
         return self.metric_store.count_candidates()
 
+    def summarize(self, *, selected_candidates: int) -> CandidateMetricsResult:
+        summary = self.metric_store.load_summary()
+        return CandidateMetricsResult(
+            inventory_version=self.inventory_version,
+            selected_candidates=selected_candidates,
+            refreshed_candidates=summary["candidate_count"],
+            deleted_orphan_candidates=0,
+            occurrence_count=summary["occurrence_count"],
+            raw_frequency_total=summary["raw_frequency_total"],
+            episode_dispersion_total=summary["episode_dispersion_total"],
+            show_dispersion_total=summary["show_dispersion_total"],
+            display_text_updates=0,
+        )
+
     def validate(self) -> CandidateMetricsValidationResult:
         summary = self.metric_store.load_summary()
         metric_mismatches = self.metric_store.count_mismatches()

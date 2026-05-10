@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+
 from podcast_frequency_list.cli.emitters import (
     emit_candidate_metrics_result,
     emit_candidate_metrics_validation,
@@ -15,7 +17,17 @@ from podcast_frequency_list.config import load_settings
 from podcast_frequency_list.corpus_review import CorpusMilestoneReviewService
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--refresh-first", action="store_true")
+    parser.add_argument("--check-determinism", action="store_true")
+    parser.add_argument("--validate-metrics", action="store_true")
+    return parser
+
+
 def main() -> None:
+    args = _build_parser().parse_args()
     settings = load_settings()
     service = CorpusMilestoneReviewService(
         db_path=settings.db_path,
@@ -23,21 +35,28 @@ def main() -> None:
         candidate_scores_service=build_candidate_scores_service(),
     )
     try:
-        result = service.review()
+        result = service.review(
+            limit=args.limit,
+            refresh_first=args.refresh_first,
+            check_determinism=args.check_determinism,
+            validate_metrics=args.validate_metrics,
+        )
     finally:
         service.close()
 
     emit_candidate_metrics_result(result.metrics_result)
-    emit_fields((("metrics_is_deterministic", int(result.metrics_is_deterministic)),))
-    emit_candidate_metrics_validation(result.metrics_validation)
+    if result.metrics_is_deterministic is not None:
+        emit_fields((("metrics_is_deterministic", int(result.metrics_is_deterministic)),))
+    if result.metrics_validation is not None:
+        emit_candidate_metrics_validation(result.metrics_validation)
     emit_candidate_scores_result(result.scores_result)
-    emit_fields(
-        (
-            ("scores_is_deterministic", int(result.scores_is_deterministic)),
-            ("middle_offset", result.middle_offset),
-            ("tail_offset", result.tail_offset),
-        )
-    )
+    score_fields: list[tuple[str, object]] = [
+        ("middle_offset", result.middle_offset),
+        ("tail_offset", result.tail_offset),
+    ]
+    if result.scores_is_deterministic is not None:
+        score_fields.insert(0, ("scores_is_deterministic", int(result.scores_is_deterministic)))
+    emit_fields(tuple(score_fields))
     for row in result.dispersion_rows:
         emit_record(
             (
