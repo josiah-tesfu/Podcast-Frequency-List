@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import argparse
+
 from podcast_frequency_list.cli.output import emit_fields, emit_record
 from podcast_frequency_list.cli.service_factories import (
     build_asr_run_service,
@@ -13,11 +15,18 @@ from podcast_frequency_list.config import load_settings
 from podcast_frequency_list.show_processing import ShowProcessingService
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--skip-asr", action="store_true")
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = _parse_args()
     settings = load_settings()
     service = ShowProcessingService(
         db_path=settings.db_path,
-        asr_run_service=build_asr_run_service(),
+        asr_run_service=None if args.skip_asr else build_asr_run_service(),
         transcript_normalization_service=build_transcript_normalization_service(),
         segment_qc_service=build_segment_qc_service(),
         sentence_split_service=build_sentence_split_service(),
@@ -25,7 +34,7 @@ def main() -> None:
         candidate_inventory_service=build_candidate_inventory_service(),
     )
     try:
-        result = service.process_manifest()
+        result = service.process_manifest(skip_asr=args.skip_asr)
     finally:
         service.close()
 

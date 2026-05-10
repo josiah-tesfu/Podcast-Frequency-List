@@ -70,7 +70,7 @@ class ShowProcessingService:
         self,
         *,
         db_path: Path,
-        asr_run_service: AsrRunService,
+        asr_run_service: AsrRunService | None,
         transcript_normalization_service: TranscriptNormalizationService,
         segment_qc_service: SegmentQcService,
         sentence_split_service: SentenceSplitService,
@@ -94,11 +94,18 @@ class ShowProcessingService:
             self.sentence_tokenization_service,
             self.candidate_inventory_service,
         ):
+            if service is None:
+                continue
             close = getattr(service, "close", None)
             if close is not None:
                 close()
 
-    def process_manifest(self, *, manifest_path: Path | None = None) -> ShowProcessingResult:
+    def process_manifest(
+        self,
+        *,
+        manifest_path: Path | None = None,
+        skip_asr: bool = False,
+    ) -> ShowProcessingResult:
         manifest_rows = tuple(row for row in load_show_manifest(manifest_path) if row.enabled)
         if not manifest_rows:
             raise ShowProcessingError("no enabled shows found in manifest")
@@ -107,7 +114,7 @@ class ShowProcessingService:
         for manifest_row in manifest_rows:
             slice_name = _build_slice_name(manifest_row)
             slice_info = self._load_slice_info(slice_name=slice_name, slug=manifest_row.slug)
-            asr_result = self._run_asr(slice_name=slice_name)
+            asr_result = self._run_asr(slice_name=slice_name, skip_asr=skip_asr)
             normalization_result = self._run_normalization(slice_name=slice_name)
             qc_result = self._run_qc(slice_name=slice_name)
             split_result = self._run_split(slice_name=slice_name)
@@ -146,32 +153,39 @@ class ShowProcessingService:
             rows=tuple(rows),
         )
 
-    def _run_asr(self, *, slice_name: str) -> AsrRunResult:
+    def _run_asr(self, *, slice_name: str, skip_asr: bool) -> AsrRunResult:
+        if skip_asr:
+            return self._empty_asr_result(slice_name=slice_name)
+        if self.asr_run_service is None:
+            raise ShowProcessingError("asr_run_service is required unless skip_asr is enabled")
         try:
             return self.asr_run_service.run_pilot(pilot_name=slice_name)
         except AsrRunError as exc:
             if str(exc) == _NO_ASR_READY_MESSAGE:
-                model = str(
-                    getattr(
-                        getattr(self.asr_run_service, "transcriber", None),
-                        "model",
-                        "unknown",
-                    )
-                )
-                return AsrRunResult(
-                    pilot_name=slice_name,
-                    model=model,
-                    requested_limit=None,
-                    selected_count=0,
-                    completed_count=0,
-                    skipped_count=0,
-                    failed_count=0,
-                    chunk_count=0,
-                    episode_results=(),
-                )
+                return self._empty_asr_result(slice_name=slice_name)
             raise ShowProcessingError(f"slice={slice_name} stage=asr: {exc}") from exc
         except Exception as exc:
             raise ShowProcessingError(f"slice={slice_name} stage=asr: {exc}") from exc
+
+    def _empty_asr_result(self, *, slice_name: str) -> AsrRunResult:
+        model = str(
+            getattr(
+                getattr(self.asr_run_service, "transcriber", None),
+                "model",
+                "unknown",
+            )
+        )
+        return AsrRunResult(
+            pilot_name=slice_name,
+            model=model,
+            requested_limit=None,
+            selected_count=0,
+            completed_count=0,
+            skipped_count=0,
+            failed_count=0,
+            chunk_count=0,
+            episode_results=(),
+        )
 
     def _run_normalization(self, *, slice_name: str) -> NormalizationRunResult:
         return self._run_stage(

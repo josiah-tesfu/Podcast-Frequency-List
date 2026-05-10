@@ -327,6 +327,33 @@ def test_show_processing_service_stops_on_stage_failure(tmp_path: Path) -> None:
     ]
 
 
+def test_show_processing_service_supports_skip_asr(tmp_path: Path) -> None:
+    db_path, manifest_path = _seed_manifest_slices(tmp_path)
+    calls: list[tuple[str, str]] = []
+    service = ShowProcessingService(
+        db_path=db_path,
+        asr_run_service=None,
+        transcript_normalization_service=_FakeNormalizationService(calls),
+        segment_qc_service=_FakeQcService(calls),
+        sentence_split_service=_FakeSentenceSplitService(calls),
+        sentence_tokenization_service=_FakeTokenizationService(calls),
+        candidate_inventory_service=_FakeInventoryService(calls),
+    )
+
+    result = service.process_manifest(manifest_path=manifest_path, skip_asr=True)
+
+    assert result.asr_selected_episodes == 0
+    assert result.asr_completed_episodes == 0
+    assert result.asr_failed_episodes == 0
+    assert calls[:5] == [
+        ("normalize", "zack-1h-slice"),
+        ("qc", "zack-1h-slice"),
+        ("split", "zack-1h-slice"),
+        ("tokenize", "zack-1h-slice"),
+        ("generate", "zack-1h-slice"),
+    ]
+
+
 def test_show_processing_service_errors_when_manifest_slice_missing(tmp_path: Path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)
