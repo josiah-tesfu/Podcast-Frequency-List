@@ -10,6 +10,7 @@ class _CandidateScoreInput:
     ngram_size: int
     raw_frequency: int
     episode_dispersion: int
+    show_dispersion: int
     t_score: float | None
     npmi: float | None
     left_entropy: float | None

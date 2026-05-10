@@ -19,7 +19,7 @@ def _insert_candidate(
     ngram_size: int,
     raw_frequency: int,
     episode_dispersion: int,
-    show_dispersion: int = 1,
+    show_dispersion: int = 8,
     t_score: float | None = None,
     npmi: float | None = None,
     left_entropy: float | None = None,
@@ -686,6 +686,110 @@ def test_refresh_candidate_scores_assigns_edge_clitic_discard_family(tmp_path) -
     assert row["is_eligible"] == 0
     assert row["final_score"] is None
     assert row["lane_rank"] is None
+
+
+def test_refresh_candidate_scores_requires_show_dispersion_support_gate(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="de",
+            display_text="de",
+            ngram_size=1,
+            raw_frequency=40,
+            episode_dispersion=12,
+            show_dispersion=7,
+        )
+        _insert_candidate(
+            connection,
+            candidate_key="en fait",
+            display_text="en fait",
+            ngram_size=2,
+            raw_frequency=40,
+            episode_dispersion=12,
+            show_dispersion=7,
+            t_score=4.0,
+            npmi=0.8,
+            left_entropy=1.0,
+            right_entropy=1.2,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=6.5,
+            min_component_information=4.2,
+            high_information_token_count=0,
+        )
+        _insert_candidate(
+            connection,
+            candidate_key="du coup",
+            display_text="du coup",
+            ngram_size=2,
+            raw_frequency=40,
+            episode_dispersion=12,
+            show_dispersion=8,
+            t_score=4.0,
+            npmi=0.8,
+            left_entropy=1.0,
+            right_entropy=1.2,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=6.5,
+            min_component_information=4.2,
+            high_information_token_count=0,
+        )
+        connection.commit()
+
+    result = CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                cand.candidate_key,
+                score.passes_support_gate,
+                score.passes_quality_gate,
+                score.discard_family,
+                score.is_eligible,
+                score.final_score
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            ORDER BY cand.candidate_key
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchall()
+
+    row_by_key = {row["candidate_key"]: row for row in rows}
+
+    assert result.support_pass_candidates == 1
+    assert result.quality_pass_candidates == 1
+    assert result.eligible_candidates == 1
+
+    assert row_by_key["de"]["passes_support_gate"] == 0
+    assert row_by_key["de"]["passes_quality_gate"] == 0
+    assert row_by_key["de"]["discard_family"] == "support_floor"
+    assert row_by_key["de"]["is_eligible"] == 0
+    assert row_by_key["de"]["final_score"] is None
+
+    assert row_by_key["en fait"]["passes_support_gate"] == 0
+    assert row_by_key["en fait"]["passes_quality_gate"] == 0
+    assert row_by_key["en fait"]["discard_family"] == "support_floor"
+    assert row_by_key["en fait"]["is_eligible"] == 0
+    assert row_by_key["en fait"]["final_score"] is None
+
+    assert row_by_key["du coup"]["passes_support_gate"] == 1
+    assert row_by_key["du coup"]["passes_quality_gate"] == 1
+    assert row_by_key["du coup"]["discard_family"] is None
+    assert row_by_key["du coup"]["is_eligible"] == 1
+    assert row_by_key["du coup"]["final_score"] is not None
 
 
 def test_refresh_candidate_scores_rejects_high_punctuation_gap_rows(tmp_path) -> None:

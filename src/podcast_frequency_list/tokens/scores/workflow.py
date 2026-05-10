@@ -4,7 +4,7 @@ from sqlite3 import Connection
 
 from podcast_frequency_list.tokens.models import CandidateScoresResult
 from podcast_frequency_list.tokens.scores.errors import CandidateScoresError
-from podcast_frequency_list.tokens.scores.policy import _LANE_SPECS
+from podcast_frequency_list.tokens.scores.policy import _LANE_SPECS, MIN_SHOW_DISPERSION
 from podcast_frequency_list.tokens.scores.scoring import _build_scored_rows
 from podcast_frequency_list.tokens.scores.types import _CandidateScoreInput
 
@@ -186,6 +186,7 @@ def _load_candidate_inputs(
             cand.ngram_size,
             cand.raw_frequency,
             cand.episode_dispersion,
+            cand.show_dispersion,
             cand.t_score,
             cand.npmi,
             cand.left_entropy,
@@ -218,6 +219,7 @@ def _load_candidate_inputs(
 
         raw_frequency = int(row["raw_frequency"])
         episode_dispersion = int(row["episode_dispersion"])
+        show_dispersion = int(row["show_dispersion"])
         candidate_inputs.append(
             _CandidateScoreInput(
                 candidate_id=int(row["candidate_id"]),
@@ -225,6 +227,7 @@ def _load_candidate_inputs(
                 ngram_size=ngram_size,
                 raw_frequency=raw_frequency,
                 episode_dispersion=episode_dispersion,
+                show_dispersion=show_dispersion,
                 t_score=_optional_float(row["t_score"]),
                 npmi=_optional_float(row["npmi"]),
                 left_entropy=_optional_float(row["left_entropy"]),
@@ -241,6 +244,7 @@ def _load_candidate_inputs(
                 passes_support_gate=(
                     raw_frequency >= lane_spec.min_raw_frequency
                     and episode_dispersion >= lane_spec.min_episode_dispersion
+                    and show_dispersion >= MIN_SHOW_DISPERSION
                 ),
             )
         )
