@@ -369,7 +369,9 @@ CREATE TABLE IF NOT EXISTS candidate_scores (
                 'support_floor',
                 'edge_clitic_gap',
                 'weak_multiword',
-                'show_specificity'
+                'show_specificity',
+                'parent_fragment',
+                'open_edge_fragment'
             )
         ),
     is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),

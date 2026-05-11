@@ -28,6 +28,8 @@ def _insert_candidate(
     punctuation_gap_occurrence_ratio: float | None = None,
     punctuation_gap_edge_clitic_count: int | None = None,
     punctuation_gap_edge_clitic_ratio: float | None = None,
+    starts_with_standalone_clitic: int | None = None,
+    ends_with_standalone_clitic: int | None = None,
     max_component_information: float | None = None,
     min_component_information: float | None = None,
     high_information_token_count: int | None = None,
@@ -49,6 +51,12 @@ def _insert_candidate(
             0.0
             if punctuation_gap_edge_clitic_ratio is None
             else punctuation_gap_edge_clitic_ratio
+        )
+        starts_with_standalone_clitic = (
+            0 if starts_with_standalone_clitic is None else starts_with_standalone_clitic
+        )
+        ends_with_standalone_clitic = (
+            0 if ends_with_standalone_clitic is None else ends_with_standalone_clitic
         )
         max_component_information = (
             4.0 if max_component_information is None else max_component_information
@@ -82,6 +90,8 @@ def _insert_candidate(
                 punctuation_gap_occurrence_ratio,
                 punctuation_gap_edge_clitic_count,
                 punctuation_gap_edge_clitic_ratio,
+                starts_with_standalone_clitic,
+                ends_with_standalone_clitic,
                 max_component_information,
                 min_component_information,
                 high_information_token_count,
@@ -89,7 +99,7 @@ def _insert_candidate(
                 top2_show_share,
                 show_entropy
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 INVENTORY_VERSION,
@@ -107,6 +117,8 @@ def _insert_candidate(
                 punctuation_gap_occurrence_ratio,
                 punctuation_gap_edge_clitic_count,
                 punctuation_gap_edge_clitic_ratio,
+                starts_with_standalone_clitic,
+                ends_with_standalone_clitic,
                 max_component_information,
                 min_component_information,
                 high_information_token_count,
@@ -539,7 +551,7 @@ def test_refresh_candidate_scores_populates_component_scores_and_ranks(tmp_path)
 
     assert row_by_key["pense que"]["passes_support_gate"] == 1
     assert row_by_key["pense que"]["passes_quality_gate"] == 0
-    assert row_by_key["pense que"]["discard_family"] == "weak_multiword"
+    assert row_by_key["pense que"]["discard_family"] == "parent_fragment"
     assert row_by_key["pense que"]["is_eligible"] == 0
     assert row_by_key["pense que"]["association_score"] is None
     assert row_by_key["pense que"]["boundary_score"] is None
@@ -1434,7 +1446,88 @@ def test_refresh_candidate_scores_rejects_two_gram_lexical_fragments_with_domina
 
     assert row["passes_support_gate"] == 1
     assert row["passes_quality_gate"] == 0
-    assert row["discard_family"] == "weak_multiword"
+    assert row["discard_family"] == "parent_fragment"
+    assert row["is_eligible"] == 0
+
+
+def test_refresh_candidate_scores_rejects_open_edge_fragments(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        n_avez_id = _insert_candidate(
+            connection,
+            candidate_key="n avez",
+            display_text="n'avez",
+            ngram_size=2,
+            raw_frequency=11,
+            episode_dispersion=4,
+            t_score=1.1,
+            npmi=0.31,
+            left_entropy=0.18,
+            right_entropy=0.42,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            starts_with_standalone_clitic=1,
+            ends_with_standalone_clitic=0,
+            max_component_information=6.5,
+            min_component_information=3.8,
+            high_information_token_count=1,
+        )
+        vous_n_avez_id = _insert_candidate(
+            connection,
+            candidate_key="vous n avez",
+            display_text="vous n'avez",
+            ngram_size=3,
+            raw_frequency=11,
+            episode_dispersion=4,
+            t_score=1.8,
+            npmi=0.58,
+            left_entropy=1.0,
+            right_entropy=1.1,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=5.1,
+            min_component_information=4.0,
+            high_information_token_count=1,
+        )
+        _insert_containment(
+            connection,
+            smaller_candidate_id=n_avez_id,
+            larger_candidate_id=vous_n_avez_id,
+            shared_occurrence_count=11,
+            shared_episode_count=4,
+        )
+        connection.commit()
+
+    CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                score.passes_support_gate,
+                score.passes_quality_gate,
+                score.discard_family,
+                score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            AND cand.candidate_key = 'n avez'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert row["passes_support_gate"] == 1
+    assert row["passes_quality_gate"] == 0
+    assert row["discard_family"] == "open_edge_fragment"
     assert row["is_eligible"] == 0
 
 
@@ -1542,7 +1635,7 @@ def test_candidate_scores_list_candidates_by_key_keeps_order_and_ineligible_rows
     assert pense_que_row.ranking_lane == "2gram"
     assert pense_que_row.passes_support_gate == 1
     assert pense_que_row.passes_quality_gate == 0
-    assert pense_que_row.discard_family == "weak_multiword"
+    assert pense_que_row.discard_family == "parent_fragment"
     assert pense_que_row.is_eligible == 0
     assert pense_que_row.final_score is None
     assert pense_que_row.lane_rank is None

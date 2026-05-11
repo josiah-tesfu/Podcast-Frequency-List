@@ -529,6 +529,8 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert "'edge_clitic_gap'" in score_table_sql
     assert "'weak_multiword'" in score_table_sql
     assert "'show_specificity'" in score_table_sql
+    assert "'parent_fragment'" in score_table_sql
+    assert "'open_edge_fragment'" in score_table_sql
     assert "is_eligible = 1 OR lane_rank IS NULL" in score_table_sql
     assert "is_eligible = 1 OR final_score IS NULL" in score_table_sql
     assert "is_eligible = 0 OR discard_family IS NULL" in score_table_sql
@@ -1729,7 +1731,11 @@ def test_bootstrap_migrates_candidate_scores_discard_family_enum_from_v17_schema
                 discard_family TEXT
                     CHECK (
                         discard_family IS NULL
-                        OR discard_family IN ('support_floor', 'edge_clitic_gap', 'weak_multiword')
+                        OR discard_family IN (
+                            'support_floor',
+                            'edge_clitic_gap',
+                            'weak_multiword'
+                        )
                     ),
                 is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),
                 frequency_score REAL,
@@ -1793,6 +1799,8 @@ def test_bootstrap_migrates_candidate_scores_discard_family_enum_from_v17_schema
         ).fetchone()[0]
 
     assert "'show_specificity'" in score_table_sql
+    assert "'parent_fragment'" in score_table_sql
+    assert "'open_edge_fragment'" in score_table_sql
     assert row["discard_family"] == "support_floor"
     assert schema_version == SCHEMA_VERSION
 

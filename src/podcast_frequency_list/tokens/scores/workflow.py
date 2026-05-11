@@ -193,6 +193,8 @@ def _load_candidate_inputs(
             cand.right_entropy,
             cand.punctuation_gap_occurrence_ratio,
             cand.punctuation_gap_edge_clitic_ratio,
+            cand.starts_with_standalone_clitic,
+            cand.ends_with_standalone_clitic,
             cand.max_component_information,
             cand.max_show_share,
             cand.top2_show_share,
@@ -241,6 +243,12 @@ def _load_candidate_inputs(
                 punctuation_gap_edge_clitic_ratio=_optional_float(
                     row["punctuation_gap_edge_clitic_ratio"]
                 ),
+                starts_with_standalone_clitic=_optional_int(
+                    row["starts_with_standalone_clitic"]
+                ),
+                ends_with_standalone_clitic=_optional_int(
+                    row["ends_with_standalone_clitic"]
+                ),
                 max_component_information=_optional_float(row["max_component_information"]),
                 max_show_share=_optional_float(row["max_show_share"]),
                 top2_show_share=_optional_float(row["top2_show_share"]),
@@ -265,3 +273,7 @@ def _load_candidate_inputs(
 
 def _optional_float(value: object | None) -> float | None:
     return None if value is None else float(value)
+
+
+def _optional_int(value: object | None) -> int | None:
+    return None if value is None else int(value)

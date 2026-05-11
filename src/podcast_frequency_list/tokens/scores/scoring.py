@@ -9,6 +9,8 @@ from podcast_frequency_list.tokens.scores.policy import (
     BOUNDARY_KEEP_ASSOCIATION_FLOOR,
     BOUNDARY_KEEP_THRESHOLD,
     DISCARD_FAMILY_EDGE_CLITIC,
+    DISCARD_FAMILY_OPEN_EDGE_FRAGMENT,
+    DISCARD_FAMILY_PARENT_FRAGMENT,
     DISCARD_FAMILY_SHOW_SPECIFICITY,
     DISCARD_FAMILY_SUPPORT,
     DISCARD_FAMILY_WEAK_MULTIWORD,
@@ -17,6 +19,12 @@ from podcast_frequency_list.tokens.scores.policy import (
     ONE_GRAM_SPECIFICITY_MAX_PENALTY,
     ONE_GRAM_SPECIFICITY_MAX_SHOW_SHARE,
     ONE_GRAM_SPECIFICITY_SHOW_DISPERSION,
+    OPEN_EDGE_FRAGMENT_MAX_ENTROPY,
+    OPEN_EDGE_FRAGMENT_MAX_NPMI,
+    OPEN_EDGE_FRAGMENT_MIN_PARENT_SHARE,
+    PARENT_FRAGMENT_MAX_ENTROPY,
+    PARENT_FRAGMENT_MAX_NPMI,
+    PARENT_FRAGMENT_MIN_PARENT_SHARE,
     PUNCTUATION_GAP_REJECT_THRESHOLD,
     REDUNDANCY_THRESHOLD,
     SPECIFICITY_HARD_MAX_SHOW_SHARE,
@@ -122,6 +130,8 @@ def _validate_multiword_metrics(
         if (
             candidate.punctuation_gap_occurrence_ratio is None
             or candidate.punctuation_gap_edge_clitic_ratio is None
+            or candidate.starts_with_standalone_clitic is None
+            or candidate.ends_with_standalone_clitic is None
             or candidate.max_component_information is None
             or candidate.max_show_share is None
             or candidate.top2_show_share is None
@@ -147,6 +157,20 @@ def _evaluate_quality_gate(candidate: _CandidateScoreInput) -> tuple[bool, str |
 
     npmi = float(candidate.npmi)
     min_entropy = min(float(candidate.left_entropy), float(candidate.right_entropy))
+    if _is_open_edge_fragment(
+        candidate,
+        npmi=npmi,
+        min_entropy=min_entropy,
+    ):
+        return False, DISCARD_FAMILY_OPEN_EDGE_FRAGMENT
+
+    if _is_parent_fragment(
+        candidate,
+        npmi=npmi,
+        min_entropy=min_entropy,
+    ):
+        return False, DISCARD_FAMILY_PARENT_FRAGMENT
+
     if _is_hard_show_specificity_reject(
         candidate,
         npmi=npmi,
@@ -351,6 +375,38 @@ def _is_hard_show_specificity_reject(
     if float(candidate.top2_show_share or 0.0) < SPECIFICITY_HARD_TOP2_SHOW_SHARE:
         return False
     return npmi < ASSOCIATION_KEEP_THRESHOLD and min_entropy < BOUNDARY_KEEP_THRESHOLD
+
+
+def _is_open_edge_fragment(
+    candidate: _CandidateScoreInput,
+    *,
+    npmi: float,
+    min_entropy: float,
+) -> bool:
+    has_open_edge = bool(candidate.starts_with_standalone_clitic) or bool(
+        candidate.ends_with_standalone_clitic
+    )
+    return (
+        has_open_edge
+        and candidate.dominant_parent_share is not None
+        and candidate.dominant_parent_share >= OPEN_EDGE_FRAGMENT_MIN_PARENT_SHARE
+        and min_entropy < OPEN_EDGE_FRAGMENT_MAX_ENTROPY
+        and npmi < OPEN_EDGE_FRAGMENT_MAX_NPMI
+    )
+
+
+def _is_parent_fragment(
+    candidate: _CandidateScoreInput,
+    *,
+    npmi: float,
+    min_entropy: float,
+) -> bool:
+    return (
+        candidate.dominant_parent_share is not None
+        and candidate.dominant_parent_share >= PARENT_FRAGMENT_MIN_PARENT_SHARE
+        and min_entropy < PARENT_FRAGMENT_MAX_ENTROPY
+        and npmi < PARENT_FRAGMENT_MAX_NPMI
+    )
 
 
 def _specificity_penalty(candidate: _CandidateScoreInput) -> float:

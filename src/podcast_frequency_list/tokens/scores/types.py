@@ -17,6 +17,8 @@ class _CandidateScoreInput:
     right_entropy: float | None
     punctuation_gap_occurrence_ratio: float | None
     punctuation_gap_edge_clitic_ratio: float | None
+    starts_with_standalone_clitic: int | None
+    ends_with_standalone_clitic: int | None
     max_component_information: float | None
     max_show_share: float | None
     top2_show_share: float | None
