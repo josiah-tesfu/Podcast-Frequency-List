@@ -14,6 +14,8 @@ _IDENTITY_COLUMNS = (
     "punctuation_gap_occurrence_ratio",
     "punctuation_gap_edge_clitic_count",
     "punctuation_gap_edge_clitic_ratio",
+    "starts_with_standalone_clitic",
+    "ends_with_standalone_clitic",
     "max_component_information",
     "min_component_information",
     "high_information_token_count",
@@ -52,6 +54,8 @@ class _IdentityRefreshRow:
     punctuation_gap_occurrence_ratio: float | None
     punctuation_gap_edge_clitic_count: int | None
     punctuation_gap_edge_clitic_ratio: float | None
+    starts_with_standalone_clitic: int | None
+    ends_with_standalone_clitic: int | None
     max_component_information: float | None
     min_component_information: float | None
     high_information_token_count: int | None
@@ -220,6 +224,16 @@ class _UnitIdentityStore:
                 punctuation_gap_occurrence_ratio REAL,
                 punctuation_gap_edge_clitic_count INTEGER,
                 punctuation_gap_edge_clitic_ratio REAL,
+                starts_with_standalone_clitic INTEGER
+                    CHECK (
+                        starts_with_standalone_clitic IS NULL
+                        OR starts_with_standalone_clitic IN (0, 1)
+                    ),
+                ends_with_standalone_clitic INTEGER
+                    CHECK (
+                        ends_with_standalone_clitic IS NULL
+                        OR ends_with_standalone_clitic IN (0, 1)
+                    ),
                 max_component_information REAL,
                 min_component_information REAL,
                 high_information_token_count INTEGER
@@ -233,11 +247,13 @@ class _UnitIdentityStore:
                 punctuation_gap_occurrence_ratio,
                 punctuation_gap_edge_clitic_count,
                 punctuation_gap_edge_clitic_ratio,
+                starts_with_standalone_clitic,
+                ends_with_standalone_clitic,
                 max_component_information,
                 min_component_information,
                 high_information_token_count
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 (
@@ -246,6 +262,8 @@ class _UnitIdentityStore:
                     row.punctuation_gap_occurrence_ratio,
                     row.punctuation_gap_edge_clitic_count,
                     row.punctuation_gap_edge_clitic_ratio,
+                    row.starts_with_standalone_clitic,
+                    row.ends_with_standalone_clitic,
                     row.max_component_information,
                     row.min_component_information,
                     row.high_information_token_count,
@@ -370,9 +388,9 @@ def _build_refresh_row(
     token_information_by_key: dict[str, float],
     high_information_threshold: float | None,
 ) -> _IdentityRefreshRow:
+    candidate_tokens = candidate_row.candidate_key.split()
     token_information_values = [
-        token_information_by_key.get(token_key)
-        for token_key in candidate_row.candidate_key.split()
+        token_information_by_key.get(token_key) for token_key in candidate_tokens
     ]
     information_values = [value for value in token_information_values if value is not None]
 
@@ -399,6 +417,12 @@ def _build_refresh_row(
         punctuation_gap_occurrence_ratio=punctuation_gap_occurrence_ratio,
         punctuation_gap_edge_clitic_count=punctuation_gap_edge_clitic_count,
         punctuation_gap_edge_clitic_ratio=punctuation_gap_edge_clitic_ratio,
+        starts_with_standalone_clitic=int(
+            bool(candidate_tokens) and candidate_tokens[0] in STANDALONE_CLITIC_JUNK
+        ),
+        ends_with_standalone_clitic=int(
+            bool(candidate_tokens) and candidate_tokens[-1] in STANDALONE_CLITIC_JUNK
+        ),
         max_component_information=max_component_information,
         min_component_information=min_component_information,
         high_information_token_count=high_information_token_count,

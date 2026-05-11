@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "18"
+SCHEMA_VERSION = "19"
 
 
 def get_schema_path() -> Path:
@@ -220,6 +220,28 @@ _TOKEN_CANDIDATE_MIGRATIONS = (
                 punctuation_gap_edge_clitic_ratio >= 0
                 AND punctuation_gap_edge_clitic_ratio <= 1
             )
+        )
+        """,
+    ),
+    (
+        "starts_with_standalone_clitic",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN starts_with_standalone_clitic INTEGER
+        CHECK (
+            starts_with_standalone_clitic IS NULL
+            OR starts_with_standalone_clitic IN (0, 1)
+        )
+        """,
+    ),
+    (
+        "ends_with_standalone_clitic",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN ends_with_standalone_clitic INTEGER
+        CHECK (
+            ends_with_standalone_clitic IS NULL
+            OR ends_with_standalone_clitic IN (0, 1)
         )
         """,
     ),

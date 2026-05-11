@@ -242,6 +242,16 @@ CREATE TABLE IF NOT EXISTS token_candidates (
                 AND punctuation_gap_edge_clitic_ratio <= 1
             )
         ),
+    starts_with_standalone_clitic INTEGER
+        CHECK (
+            starts_with_standalone_clitic IS NULL
+            OR starts_with_standalone_clitic IN (0, 1)
+        ),
+    ends_with_standalone_clitic INTEGER
+        CHECK (
+            ends_with_standalone_clitic IS NULL
+            OR ends_with_standalone_clitic IN (0, 1)
+        ),
     max_component_information REAL
         CHECK (max_component_information IS NULL OR max_component_information >= 0),
     min_component_information REAL
