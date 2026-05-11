@@ -7,7 +7,7 @@ from podcast_frequency_list.tokens.models import CandidateSummaryRow
 from podcast_frequency_list.tokens.scores.policy import _LANE_SPECS
 from podcast_frequency_list.tokens.spans import DEFAULT_MAX_NGRAM_SIZE
 
-_SCORE_SUMMARY_COLUMNS_SQL = f"""
+_SCORE_SUMMARY_BASE_COLUMNS_SQL = """
     cand.candidate_key,
     cand.display_text,
     cand.ngram_size,
@@ -29,7 +29,9 @@ _SCORE_SUMMARY_COLUMNS_SQL = f"""
     cand.high_information_token_count,
     cand.max_show_share,
     cand.top2_show_share,
-    cand.show_entropy,
+    cand.show_entropy
+"""
+_SCORE_SUMMARY_STEP5_COLUMNS_SQL = f"""
     CASE
         WHEN cand.ngram_size < {DEFAULT_MAX_NGRAM_SIZE}
         THEN COALESCE(covered_occurrences.covered_by_any_count, 0)
@@ -64,7 +66,19 @@ _SCORE_SUMMARY_COLUMNS_SQL = f"""
     CASE
         WHEN cand.ngram_size < {DEFAULT_MAX_NGRAM_SIZE}
         THEN dominant_parent.dominant_parent_side
-    END AS dominant_parent_side,
+    END AS dominant_parent_side
+"""
+_SCORE_SUMMARY_STEP5_NULL_COLUMNS_SQL = """
+    NULL AS covered_by_any_count,
+    NULL AS covered_by_any_ratio,
+    NULL AS independent_occurrence_count,
+    NULL AS direct_parent_count,
+    NULL AS dominant_parent_key,
+    NULL AS dominant_parent_shared_count,
+    NULL AS dominant_parent_share,
+    NULL AS dominant_parent_side
+"""
+_SCORE_SUMMARY_SCORE_COLUMNS_SQL = """
     score.score_version,
     score.ranking_lane,
     score.passes_support_gate,
@@ -156,6 +170,8 @@ class _CandidateScoreSummaryStore:
     def list_candidates_by_key(
         self,
         candidate_keys: Iterable[str],
+        *,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
         ordered_keys = _normalize_candidate_keys(candidate_keys)
         if not ordered_keys:
@@ -164,6 +180,7 @@ class _CandidateScoreSummaryStore:
         rows = self._list_rows(
             where_sql=f"cand.candidate_key IN ({_sql_placeholders(len(ordered_keys))})",
             parameters=ordered_keys,
+            include_step5=include_step5,
         )
         row_by_key = {row.candidate_key: row for row in rows}
         return tuple(
@@ -178,6 +195,7 @@ class _CandidateScoreSummaryStore:
         ngram_size: int,
         limit: int,
         offset: int = 0,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
         lane_name = _LANE_SPECS[ngram_size].ranking_lane
         return self._list_rows(
@@ -186,6 +204,7 @@ class _CandidateScoreSummaryStore:
             order_sql="score.lane_rank ASC",
             limit=limit,
             offset=offset,
+            include_step5=include_step5,
         )
 
     def list_global_candidates(
@@ -193,12 +212,14 @@ class _CandidateScoreSummaryStore:
         *,
         limit: int,
         offset: int = 0,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
         return self._list_rows(
             where_sql="score.is_eligible = 1",
             order_sql="score.final_score DESC, cand.raw_frequency DESC, cand.candidate_key",
             limit=limit,
             offset=offset,
+            include_step5=include_step5,
         )
 
     def _list_rows(
@@ -209,29 +230,44 @@ class _CandidateScoreSummaryStore:
         order_sql: str = "",
         limit: int | None = None,
         offset: int = 0,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
+        score_summary_columns_sql = _build_score_summary_columns_sql(
+            include_step5=include_step5
+        )
         sql_lines = [
-            _SCORE_SUMMARY_CTES_SQL,
             "SELECT",
-            _SCORE_SUMMARY_COLUMNS_SQL,
+            score_summary_columns_sql,
             "FROM candidate_scores score",
             "JOIN token_candidates cand",
             "    ON cand.candidate_id = score.candidate_id",
             "    AND cand.inventory_version = score.inventory_version",
-            "LEFT JOIN covered_occurrences",
-            "    ON covered_occurrences.candidate_id = cand.candidate_id",
-            "LEFT JOIN dominant_parent",
-            "    ON dominant_parent.candidate_id = cand.candidate_id",
             "WHERE score.inventory_version = ?",
             "AND score.score_version = ?",
         ]
-        query_parameters: list[object] = [
-            self.inventory_version,
-            self.inventory_version,
-            self.inventory_version,
-            self.score_version,
-            *parameters,
-        ]
+        query_parameters: list[object]
+
+        if include_step5:
+            sql_lines.insert(0, _SCORE_SUMMARY_CTES_SQL)
+            sql_lines[6:6] = [
+                "LEFT JOIN covered_occurrences",
+                "    ON covered_occurrences.candidate_id = cand.candidate_id",
+                "LEFT JOIN dominant_parent",
+                "    ON dominant_parent.candidate_id = cand.candidate_id",
+            ]
+            query_parameters = [
+                self.inventory_version,
+                self.inventory_version,
+                self.inventory_version,
+                self.score_version,
+                *parameters,
+            ]
+        else:
+            query_parameters = [
+                self.inventory_version,
+                self.score_version,
+                *parameters,
+            ]
 
         if where_sql:
             sql_lines.append(f"AND {where_sql}")
@@ -254,6 +290,21 @@ class _CandidateScoreSummaryStore:
             tuple(query_parameters),
         ).fetchall()
         return tuple(_row_to_candidate_summary(row) for row in rows)
+
+
+def _build_score_summary_columns_sql(*, include_step5: bool) -> str:
+    step5_columns_sql = (
+        _SCORE_SUMMARY_STEP5_COLUMNS_SQL
+        if include_step5
+        else _SCORE_SUMMARY_STEP5_NULL_COLUMNS_SQL
+    )
+    return ",\n".join(
+        (
+            _SCORE_SUMMARY_BASE_COLUMNS_SQL.strip(),
+            step5_columns_sql.strip(),
+            _SCORE_SUMMARY_SCORE_COLUMNS_SQL.strip(),
+        )
+    )
 
 
 def _normalize_candidate_keys(candidate_keys: Iterable[str]) -> tuple[str, ...]:

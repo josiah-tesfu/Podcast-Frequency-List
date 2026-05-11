@@ -23,6 +23,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--refresh-first", action="store_true")
     parser.add_argument("--check-determinism", action="store_true")
     parser.add_argument("--validate-metrics", action="store_true")
+    parser.add_argument("--full-fields", action="store_true")
     return parser
 
 
@@ -40,6 +41,7 @@ def main() -> None:
             refresh_first=args.refresh_first,
             check_determinism=args.check_determinism,
             validate_metrics=args.validate_metrics,
+            light_mode=not args.full_fields,
         )
     finally:
         service.close()
@@ -81,7 +83,7 @@ def main() -> None:
         record_type="top_global",
         include_step4=True,
         include_follow_up=True,
-        include_step5=True,
+        include_step5=args.full_fields,
         include_step6=True,
     )
     emit_fields((("middle_candidate_count_global", len(result.middle_rows)),))
@@ -90,7 +92,7 @@ def main() -> None:
         record_type="middle_global",
         include_step4=True,
         include_follow_up=True,
-        include_step5=True,
+        include_step5=args.full_fields,
         include_step6=True,
         rank_start=result.middle_offset + 1,
     )
@@ -100,7 +102,7 @@ def main() -> None:
         record_type="tail_global",
         include_step4=True,
         include_follow_up=True,
-        include_step5=True,
+        include_step5=args.full_fields,
         include_step6=True,
         rank_start=result.tail_offset + 1,
     )
@@ -110,7 +112,7 @@ def main() -> None:
         record_type="focus_candidate",
         include_step4=True,
         include_follow_up=True,
-        include_step5=True,
+        include_step5=args.full_fields,
         include_step6=True,
     )
 

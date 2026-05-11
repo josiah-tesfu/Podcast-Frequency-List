@@ -41,13 +41,14 @@ class CandidateScoresService:
         candidate_keys: Iterable[str],
         inventory_version: str = INVENTORY_VERSION,
         score_version: str = SCORE_VERSION,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
         with connect(self.db_path) as connection:
             return _CandidateScoreSummaryStore(
                 connection=connection,
                 inventory_version=inventory_version,
                 score_version=score_version,
-            ).list_candidates_by_key(candidate_keys)
+            ).list_candidates_by_key(candidate_keys, include_step5=include_step5)
 
     def list_top_candidates(
         self,
@@ -57,6 +58,7 @@ class CandidateScoresService:
         offset: int = 0,
         inventory_version: str = INVENTORY_VERSION,
         score_version: str = SCORE_VERSION,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
         _validate_ngram_size(ngram_size)
         _validate_limit(limit)
@@ -67,7 +69,12 @@ class CandidateScoresService:
                 connection=connection,
                 inventory_version=inventory_version,
                 score_version=score_version,
-            ).list_top_candidates(ngram_size=ngram_size, limit=limit, offset=offset)
+            ).list_top_candidates(
+                ngram_size=ngram_size,
+                limit=limit,
+                offset=offset,
+                include_step5=include_step5,
+            )
 
     def list_global_candidates(
         self,
@@ -76,6 +83,7 @@ class CandidateScoresService:
         offset: int = 0,
         inventory_version: str = INVENTORY_VERSION,
         score_version: str = SCORE_VERSION,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
         _validate_limit(limit)
         _validate_offset(offset)
@@ -85,7 +93,11 @@ class CandidateScoresService:
                 connection=connection,
                 inventory_version=inventory_version,
                 score_version=score_version,
-            ).list_global_candidates(limit=limit, offset=offset)
+            ).list_global_candidates(
+                limit=limit,
+                offset=offset,
+                include_step5=include_step5,
+            )
 
     def refresh(
         self,

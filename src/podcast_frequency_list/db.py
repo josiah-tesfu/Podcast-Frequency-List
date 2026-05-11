@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "17"
+SCHEMA_VERSION = "18"
 
 
 def get_schema_path() -> Path:
@@ -397,11 +397,16 @@ def migrate_candidate_scores_schema(connection: sqlite3.Connection) -> None:
         row["name"]
         for row in connection.execute("PRAGMA table_info(candidate_scores)").fetchall()
     }
-    if {
-        "passes_support_gate",
-        "passes_quality_gate",
-        "discard_family",
-    } <= columns and "discard_family IS NOT NULL" in table_sql:
+    if (
+        {
+            "passes_support_gate",
+            "passes_quality_gate",
+            "discard_family",
+        }
+        <= columns
+        and "discard_family IS NOT NULL" in table_sql
+        and "'show_specificity'" in table_sql
+    ):
         return
 
     connection.execute("ALTER TABLE candidate_scores RENAME TO candidate_scores_old")
@@ -417,7 +422,12 @@ def migrate_candidate_scores_schema(connection: sqlite3.Connection) -> None:
             discard_family TEXT
                 CHECK (
                     discard_family IS NULL
-                    OR discard_family IN ('support_floor', 'edge_clitic_gap', 'weak_multiword')
+                    OR discard_family IN (
+                        'support_floor',
+                        'edge_clitic_gap',
+                        'weak_multiword',
+                        'show_specificity'
+                    )
                 ),
             is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),
             frequency_score REAL,

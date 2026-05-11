@@ -94,6 +94,7 @@ class CorpusMilestoneReviewService:
         refresh_first: bool = False,
         check_determinism: bool = False,
         validate_metrics: bool = False,
+        light_mode: bool = True,
     ) -> CorpusMilestoneReviewResult:
         if limit < 1:
             raise CorpusMilestoneReviewError("limit must be positive")
@@ -167,23 +168,27 @@ class CorpusMilestoneReviewService:
                 offset=0,
                 inventory_version=inventory_version,
                 score_version=score_version,
+                include_step5=not light_mode,
             ),
             middle_rows=self.candidate_scores_service.list_global_candidates(
                 limit=limit,
                 offset=middle_offset,
                 inventory_version=inventory_version,
                 score_version=score_version,
+                include_step5=not light_mode,
             ),
             tail_rows=self.candidate_scores_service.list_global_candidates(
                 limit=limit,
                 offset=tail_offset,
                 inventory_version=inventory_version,
                 score_version=score_version,
+                include_step5=not light_mode,
             ),
             focus_rows=self.candidate_scores_service.list_candidates_by_key(
                 candidate_keys=_FOCUS_KEYS,
                 inventory_version=inventory_version,
                 score_version=score_version,
+                include_step5=not light_mode,
             ),
         )
 

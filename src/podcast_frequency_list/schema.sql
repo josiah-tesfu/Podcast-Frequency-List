@@ -355,7 +355,12 @@ CREATE TABLE IF NOT EXISTS candidate_scores (
     discard_family TEXT
         CHECK (
             discard_family IS NULL
-            OR discard_family IN ('support_floor', 'edge_clitic_gap', 'weak_multiword')
+            OR discard_family IN (
+                'support_floor',
+                'edge_clitic_gap',
+                'weak_multiword',
+                'show_specificity'
+            )
         ),
     is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),
     frequency_score REAL,

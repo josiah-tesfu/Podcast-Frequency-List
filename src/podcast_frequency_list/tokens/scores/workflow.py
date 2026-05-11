@@ -4,7 +4,7 @@ from sqlite3 import Connection
 
 from podcast_frequency_list.tokens.models import CandidateScoresResult
 from podcast_frequency_list.tokens.scores.errors import CandidateScoresError
-from podcast_frequency_list.tokens.scores.policy import _LANE_SPECS, MIN_SHOW_DISPERSION
+from podcast_frequency_list.tokens.scores.policy import _LANE_SPECS
 from podcast_frequency_list.tokens.scores.scoring import _build_scored_rows
 from podcast_frequency_list.tokens.scores.types import _CandidateScoreInput
 
@@ -194,6 +194,9 @@ def _load_candidate_inputs(
             cand.punctuation_gap_occurrence_ratio,
             cand.punctuation_gap_edge_clitic_ratio,
             cand.max_component_information,
+            cand.max_show_share,
+            cand.top2_show_share,
+            cand.show_entropy,
             CASE
                 WHEN dominant_parent.dominant_parent_shared_count IS NOT NULL
                 AND cand.raw_frequency > 0
@@ -239,12 +242,14 @@ def _load_candidate_inputs(
                     row["punctuation_gap_edge_clitic_ratio"]
                 ),
                 max_component_information=_optional_float(row["max_component_information"]),
+                max_show_share=_optional_float(row["max_show_share"]),
+                top2_show_share=_optional_float(row["top2_show_share"]),
+                show_entropy=_optional_float(row["show_entropy"]),
                 dominant_parent_share=_optional_float(row["dominant_parent_share"]),
                 ranking_lane=lane_spec.ranking_lane,
                 passes_support_gate=(
                     raw_frequency >= lane_spec.min_raw_frequency
                     and episode_dispersion >= lane_spec.min_episode_dispersion
-                    and show_dispersion >= MIN_SHOW_DISPERSION
                 ),
             )
         )

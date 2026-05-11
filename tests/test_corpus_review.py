@@ -256,6 +256,7 @@ class _FakeCandidateScoresService:
         offset: int,
         inventory_version: str = INVENTORY_VERSION,
         score_version: str = SCORE_VERSION,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
         assert inventory_version == INVENTORY_VERSION
         assert score_version == SCORE_VERSION
@@ -267,6 +268,7 @@ class _FakeCandidateScoresService:
         candidate_keys,
         inventory_version: str = INVENTORY_VERSION,
         score_version: str = SCORE_VERSION,
+        include_step5: bool = True,
     ) -> tuple[CandidateSummaryRow, ...]:
         assert inventory_version == INVENTORY_VERSION
         assert score_version == SCORE_VERSION

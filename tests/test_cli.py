@@ -25,6 +25,7 @@ from podcast_frequency_list.tokens.models import (
     CandidateSummaryRow,
     TokenizationResult,
 )
+from podcast_frequency_list.tokens.scores import SCORE_VERSION
 
 runner = CliRunner()
 
@@ -508,7 +509,7 @@ class FakeCandidateScoresService:
         self.refresh_calls += 1
         return CandidateScoresResult(
             inventory_version="1",
-            score_version="pilot-v2",
+            score_version=SCORE_VERSION,
             selected_candidates=49_542,
             stored_candidates=49_542,
             support_pass_candidates=900,
@@ -523,7 +524,7 @@ class FakeCandidateScoresService:
         self.summary_calls += 1
         return CandidateScoresResult(
             inventory_version="1",
-            score_version="pilot-v2",
+            score_version=SCORE_VERSION,
             selected_candidates=49_542,
             stored_candidates=49_542,
             support_pass_candidates=900,
@@ -541,7 +542,7 @@ class FakeCandidateScoresService:
         limit: int = 20,
         offset: int = 0,
         inventory_version: str = "1",
-        score_version: str = "pilot-v2",
+        score_version: str = SCORE_VERSION,
     ) -> tuple[CandidateSummaryRow, ...]:
         self.top_candidate_requests.append((ngram_size, limit, offset))
         return (
@@ -598,7 +599,7 @@ class FakeCandidateScoresService:
         limit: int = 20,
         offset: int = 0,
         inventory_version: str = "1",
-        score_version: str = "pilot-v2",
+        score_version: str = SCORE_VERSION,
     ) -> tuple[CandidateSummaryRow, ...]:
         self.global_candidate_requests.append((limit, offset))
         return (
@@ -683,7 +684,7 @@ class FakeCandidateScoresService:
         *,
         candidate_keys: tuple[str, ...] | list[str],
         inventory_version: str = "1",
-        score_version: str = "pilot-v2",
+        score_version: str = SCORE_VERSION,
     ) -> tuple[CandidateSummaryRow, ...]:
         requested_keys = tuple(candidate_keys)
         self.focus_candidate_requests.append(requested_keys)
@@ -725,7 +726,7 @@ class FakeCandidateScoresService:
                     dominant_parent_shared_count=3 if ngram_size < 3 else None,
                     dominant_parent_share=0.43 if ngram_size < 3 else None,
                     dominant_parent_side="left" if ngram_size < 3 else None,
-                    score_version=score_version,
+                score_version=score_version,
                     ranking_lane=f"{ngram_size}gram",
                     passes_support_gate=0 if key == "de" else 1,
                     passes_quality_gate=0 if key == "de" else 1,
@@ -1311,7 +1312,7 @@ def test_refresh_candidate_scores_prints_stats(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert result.stdout.splitlines() == [
         "inventory_version=1",
-        "score_version=pilot-v2",
+        f"score_version={SCORE_VERSION}",
         "selected_candidates=49542",
         "stored_candidates=49542",
         "support_pass_candidates=900",
@@ -1356,7 +1357,7 @@ def test_inspect_candidate_scores_prints_summary_and_rows(tmp_path, monkeypatch)
     )
 
     assert result.exit_code == 0
-    assert "score_version=pilot-v2" in result.stdout
+    assert f"score_version={SCORE_VERSION}" in result.stdout
     assert "stored_candidates=49542" in result.stdout
     assert "support_pass_candidates=900" in result.stdout
     assert "quality_pass_candidates=624" in result.stdout
@@ -1367,13 +1368,13 @@ def test_inspect_candidate_scores_prints_summary_and_rows(tmp_path, monkeypatch)
     assert "top_candidate_count_global=2" in result.stdout
     assert "record=top_1gram\trank=2\tcandidate_key=score-candidate-1" in result.stdout
     assert (
-        "\tscore_version=pilot-v2\tranking_lane=1gram\tpasses_support_gate=1"
+        f"\tscore_version={SCORE_VERSION}\tranking_lane=1gram\tpasses_support_gate=1"
         "\tpasses_quality_gate=1\tdiscard_family=-\tis_eligible=1"
         in result.stdout
     )
     assert "record=top_2gram\trank=2\tcandidate_key=score-candidate-2" in result.stdout
     assert (
-        "\tscore_version=pilot-v2\tranking_lane=2gram\tpasses_support_gate=1"
+        f"\tscore_version={SCORE_VERSION}\tranking_lane=2gram\tpasses_support_gate=1"
         "\tpasses_quality_gate=1\tdiscard_family=-\tis_eligible=1"
         in result.stdout
     )
@@ -1410,7 +1411,7 @@ def test_inspect_candidate_scores_fails_without_scores(tmp_path, monkeypatch) ->
     fake_service = FakeCandidateScoresService()
     fake_service.summarize = lambda: CandidateScoresResult(
         inventory_version="1",
-        score_version="pilot-v2",
+        score_version=SCORE_VERSION,
         selected_candidates=23,
         stored_candidates=0,
         support_pass_candidates=0,

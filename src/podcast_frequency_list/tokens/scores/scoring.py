@@ -9,12 +9,23 @@ from podcast_frequency_list.tokens.scores.policy import (
     BOUNDARY_KEEP_ASSOCIATION_FLOOR,
     BOUNDARY_KEEP_THRESHOLD,
     DISCARD_FAMILY_EDGE_CLITIC,
+    DISCARD_FAMILY_SHOW_SPECIFICITY,
     DISCARD_FAMILY_SUPPORT,
     DISCARD_FAMILY_WEAK_MULTIWORD,
     LEXICAL_KEEP_THRESHOLD,
     LEXICAL_ONLY_ASSOCIATION_FLOOR,
+    ONE_GRAM_SPECIFICITY_MAX_PENALTY,
+    ONE_GRAM_SPECIFICITY_MAX_SHOW_SHARE,
+    ONE_GRAM_SPECIFICITY_SHOW_DISPERSION,
     PUNCTUATION_GAP_REJECT_THRESHOLD,
     REDUNDANCY_THRESHOLD,
+    SPECIFICITY_HARD_MAX_SHOW_SHARE,
+    SPECIFICITY_HARD_SHOW_DISPERSION,
+    SPECIFICITY_HARD_TOP2_SHOW_SHARE,
+    SPECIFICITY_MAX_PENALTY,
+    SPECIFICITY_SOFT_MAX_SHOW_SHARE,
+    SPECIFICITY_SOFT_SHOW_DISPERSION,
+    SPECIFICITY_SOFT_TOP2_SHOW_SHARE,
 )
 from podcast_frequency_list.tokens.scores.types import _CandidateScoreInput, _CandidateScoreRow
 
@@ -108,10 +119,12 @@ def _validate_multiword_metrics(
             candidate.punctuation_gap_occurrence_ratio is None
             or candidate.punctuation_gap_edge_clitic_ratio is None
             or candidate.max_component_information is None
+            or candidate.max_show_share is None
+            or candidate.top2_show_share is None
         ):
             raise CandidateScoresError(
                 f"{lane_name} candidate {candidate.candidate_key!r} "
-                "is missing unit identity metrics"
+                "is missing unit identity or specificity metrics"
             )
 
 
@@ -130,6 +143,13 @@ def _evaluate_quality_gate(candidate: _CandidateScoreInput) -> tuple[bool, str |
 
     npmi = float(candidate.npmi)
     min_entropy = min(float(candidate.left_entropy), float(candidate.right_entropy))
+    if _is_hard_show_specificity_reject(
+        candidate,
+        npmi=npmi,
+        min_entropy=min_entropy,
+    ):
+        return False, DISCARD_FAMILY_SHOW_SPECIFICITY
+
     max_component_information = float(candidate.max_component_information)
     passes_association_keep = npmi >= ASSOCIATION_KEEP_THRESHOLD
     passes_boundary_keep = (
@@ -186,6 +206,7 @@ def _score_lane(
                 final_score=(
                     0.65 * frequency_scores[candidate.candidate_id]
                     + 0.35 * dispersion_scores[candidate.candidate_id]
+                    - _specificity_penalty(candidate)
                 ),
                 lane_rank=None,
             )
@@ -206,19 +227,23 @@ def _score_lane(
         if lane_name == "2gram":
             support_score = 0.60 * frequency_score + 0.40 * dispersion_score
             redundancy_penalty = _redundancy_penalty(candidate.dominant_parent_share)
+            specificity_penalty = _specificity_penalty(candidate)
             final_score = (
                 0.20 * support_score
                 + 0.50 * association_score
                 + 0.20 * boundary_score
                 - 0.10 * redundancy_penalty
+                - specificity_penalty
             )
         else:
             support_score = 0.55 * frequency_score + 0.45 * dispersion_score
             redundancy_penalty = 0.0
+            specificity_penalty = _specificity_penalty(candidate)
             final_score = (
                 0.20 * support_score
                 + 0.55 * association_score
                 + 0.25 * boundary_score
+                - specificity_penalty
             )
 
         scored_rows.append(
@@ -298,6 +323,92 @@ def _redundancy_penalty(dominant_parent_share: float | None) -> float:
     )
 
 
+def _is_hard_show_specificity_reject(
+    candidate: _CandidateScoreInput,
+    *,
+    npmi: float,
+    min_entropy: float,
+) -> bool:
+    if candidate.ngram_size == 1:
+        return False
+    if candidate.show_dispersion > SPECIFICITY_HARD_SHOW_DISPERSION:
+        return False
+    if float(candidate.max_show_share or 0.0) < SPECIFICITY_HARD_MAX_SHOW_SHARE:
+        return False
+    if float(candidate.top2_show_share or 0.0) < SPECIFICITY_HARD_TOP2_SHOW_SHARE:
+        return False
+    return npmi < ASSOCIATION_KEEP_THRESHOLD and min_entropy < BOUNDARY_KEEP_THRESHOLD
+
+
+def _specificity_penalty(candidate: _CandidateScoreInput) -> float:
+    if candidate.max_show_share is None:
+        return 0.0
+
+    if candidate.ngram_size == 1:
+        return _one_gram_specificity_penalty(candidate)
+
+    if (
+        candidate.show_dispersion > SPECIFICITY_SOFT_SHOW_DISPERSION
+        or candidate.max_show_share < SPECIFICITY_SOFT_MAX_SHOW_SHARE
+    ):
+        return 0.0
+
+    spread_severity = _clamp01(
+        (SPECIFICITY_SOFT_SHOW_DISPERSION - candidate.show_dispersion)
+        / (SPECIFICITY_SOFT_SHOW_DISPERSION - 1)
+    )
+    concentration_severity = _clamp01(
+        (candidate.max_show_share - SPECIFICITY_SOFT_MAX_SHOW_SHARE)
+        / (1.0 - SPECIFICITY_SOFT_MAX_SHOW_SHARE)
+    )
+    top2_show_share = float(candidate.top2_show_share or 0.0)
+    top2_severity = _clamp01(
+        (top2_show_share - SPECIFICITY_SOFT_TOP2_SHOW_SHARE)
+        / (1.0 - SPECIFICITY_SOFT_TOP2_SHOW_SHARE)
+    )
+    specificity_severity = (spread_severity + concentration_severity + top2_severity) / 3.0
+    if specificity_severity <= 0.0:
+        return 0.0
+
+    rescue_points = 0
+    if candidate.npmi is not None and candidate.npmi >= ASSOCIATION_KEEP_THRESHOLD:
+        rescue_points += 1
+    if (
+        candidate.left_entropy is not None
+        and candidate.right_entropy is not None
+        and min(candidate.left_entropy, candidate.right_entropy) >= BOUNDARY_KEEP_THRESHOLD
+    ):
+        rescue_points += 1
+    if (
+        candidate.max_component_information is not None
+        and candidate.max_component_information >= LEXICAL_KEEP_THRESHOLD
+    ):
+        rescue_points += 1
+
+    rescue_multiplier = 1.0 if rescue_points == 0 else 0.65 if rescue_points == 1 else 0.35
+    return SPECIFICITY_MAX_PENALTY * specificity_severity * rescue_multiplier
+
+
+def _one_gram_specificity_penalty(candidate: _CandidateScoreInput) -> float:
+    if (
+        candidate.show_dispersion > ONE_GRAM_SPECIFICITY_SHOW_DISPERSION
+        or candidate.max_show_share < ONE_GRAM_SPECIFICITY_MAX_SHOW_SHARE
+    ):
+        return 0.0
+
+    spread_severity = _clamp01(
+        (ONE_GRAM_SPECIFICITY_SHOW_DISPERSION - candidate.show_dispersion)
+        / (ONE_GRAM_SPECIFICITY_SHOW_DISPERSION - 1)
+    )
+    concentration_severity = _clamp01(
+        (candidate.max_show_share - ONE_GRAM_SPECIFICITY_MAX_SHOW_SHARE)
+        / (1.0 - ONE_GRAM_SPECIFICITY_MAX_SHOW_SHARE)
+    )
+    return ONE_GRAM_SPECIFICITY_MAX_PENALTY * (
+        (spread_severity + concentration_severity) / 2.0
+    )
+
+
 def _assign_lane_ranks(
     scored_rows: list[_CandidateScoreRow],
     candidates: list[_CandidateScoreInput],
@@ -348,3 +459,7 @@ def _min_max_normalize(values: dict[int, float]) -> dict[int, float]:
         candidate_id: (value - min_value) / scale
         for candidate_id, value in values.items()
     }
+
+
+def _clamp01(value: float) -> float:
+    return max(0.0, min(1.0, value))

@@ -641,7 +641,45 @@ def test_refresh_candidate_scores_requires_unit_identity_metrics_for_multiword_c
     with pytest.raises(CandidateScoresError) as exc_info:
         service.refresh()
 
-    assert "missing unit identity metrics" in str(exc_info.value)
+    assert "missing unit identity or specificity metrics" in str(exc_info.value)
+
+
+def test_refresh_candidate_scores_requires_specificity_metrics_for_multiword_candidates(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        candidate_id = _insert_candidate(
+            connection,
+            candidate_key="du coup",
+            display_text="du coup",
+            ngram_size=2,
+            raw_frequency=10,
+            episode_dispersion=3,
+            t_score=1.0,
+            npmi=0.5,
+            left_entropy=0.5,
+            right_entropy=0.6,
+        )
+        connection.execute(
+            """
+            UPDATE token_candidates
+            SET max_show_share = NULL,
+                top2_show_share = NULL
+            WHERE candidate_id = ?
+            """,
+            (candidate_id,),
+        )
+        connection.commit()
+
+    service = CandidateScoresService(db_path=db_path)
+
+    with pytest.raises(CandidateScoresError) as exc_info:
+        service.refresh()
+
+    assert "missing unit identity or specificity metrics" in str(exc_info.value)
 
 
 def test_refresh_candidate_scores_assigns_edge_clitic_discard_family(tmp_path) -> None:
@@ -700,7 +738,7 @@ def test_refresh_candidate_scores_assigns_edge_clitic_discard_family(tmp_path) -
     assert row["lane_rank"] is None
 
 
-def test_refresh_candidate_scores_requires_show_dispersion_support_gate(tmp_path) -> None:
+def test_refresh_candidate_scores_support_gate_ignores_show_dispersion(tmp_path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)
 
@@ -712,7 +750,7 @@ def test_refresh_candidate_scores_requires_show_dispersion_support_gate(tmp_path
             ngram_size=1,
             raw_frequency=40,
             episode_dispersion=12,
-            show_dispersion=7,
+            show_dispersion=1,
         )
         _insert_candidate(
             connection,
@@ -721,7 +759,7 @@ def test_refresh_candidate_scores_requires_show_dispersion_support_gate(tmp_path
             ngram_size=2,
             raw_frequency=40,
             episode_dispersion=12,
-            show_dispersion=7,
+            show_dispersion=1,
             t_score=4.0,
             npmi=0.8,
             left_entropy=1.0,
@@ -733,6 +771,8 @@ def test_refresh_candidate_scores_requires_show_dispersion_support_gate(tmp_path
             max_component_information=6.5,
             min_component_information=4.2,
             high_information_token_count=0,
+            max_show_share=0.3,
+            top2_show_share=0.45,
         )
         _insert_candidate(
             connection,
@@ -741,7 +781,7 @@ def test_refresh_candidate_scores_requires_show_dispersion_support_gate(tmp_path
             ngram_size=2,
             raw_frequency=40,
             episode_dispersion=12,
-            show_dispersion=8,
+            show_dispersion=2,
             t_score=4.0,
             npmi=0.8,
             left_entropy=1.0,
@@ -753,6 +793,8 @@ def test_refresh_candidate_scores_requires_show_dispersion_support_gate(tmp_path
             max_component_information=6.5,
             min_component_information=4.2,
             high_information_token_count=0,
+            max_show_share=0.35,
+            top2_show_share=0.55,
         )
         connection.commit()
 
@@ -781,27 +823,196 @@ def test_refresh_candidate_scores_requires_show_dispersion_support_gate(tmp_path
 
     row_by_key = {row["candidate_key"]: row for row in rows}
 
-    assert result.support_pass_candidates == 1
-    assert result.quality_pass_candidates == 1
-    assert result.eligible_candidates == 1
+    assert result.support_pass_candidates == 3
+    assert result.quality_pass_candidates == 3
+    assert result.eligible_candidates == 3
 
-    assert row_by_key["de"]["passes_support_gate"] == 0
-    assert row_by_key["de"]["passes_quality_gate"] == 0
-    assert row_by_key["de"]["discard_family"] == "support_floor"
-    assert row_by_key["de"]["is_eligible"] == 0
-    assert row_by_key["de"]["final_score"] is None
+    assert row_by_key["de"]["passes_support_gate"] == 1
+    assert row_by_key["de"]["passes_quality_gate"] == 1
+    assert row_by_key["de"]["discard_family"] is None
+    assert row_by_key["de"]["is_eligible"] == 1
+    assert row_by_key["de"]["final_score"] is not None
 
-    assert row_by_key["en fait"]["passes_support_gate"] == 0
-    assert row_by_key["en fait"]["passes_quality_gate"] == 0
-    assert row_by_key["en fait"]["discard_family"] == "support_floor"
-    assert row_by_key["en fait"]["is_eligible"] == 0
-    assert row_by_key["en fait"]["final_score"] is None
+    assert row_by_key["en fait"]["passes_support_gate"] == 1
+    assert row_by_key["en fait"]["passes_quality_gate"] == 1
+    assert row_by_key["en fait"]["discard_family"] is None
+    assert row_by_key["en fait"]["is_eligible"] == 1
+    assert row_by_key["en fait"]["final_score"] is not None
 
     assert row_by_key["du coup"]["passes_support_gate"] == 1
     assert row_by_key["du coup"]["passes_quality_gate"] == 1
     assert row_by_key["du coup"]["discard_family"] is None
     assert row_by_key["du coup"]["is_eligible"] == 1
     assert row_by_key["du coup"]["final_score"] is not None
+
+
+def test_refresh_candidate_scores_assigns_show_specificity_discard_family(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="le match",
+            display_text="le match",
+            ngram_size=2,
+            raw_frequency=40,
+            episode_dispersion=12,
+            show_dispersion=3,
+            t_score=2.0,
+            npmi=0.2,
+            left_entropy=1.0,
+            right_entropy=1.2,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=6.5,
+            min_component_information=4.2,
+            high_information_token_count=0,
+            max_show_share=0.82,
+            top2_show_share=0.95,
+        )
+        _insert_candidate(
+            connection,
+            candidate_key="un souvenir",
+            display_text="un souvenir",
+            ngram_size=2,
+            raw_frequency=40,
+            episode_dispersion=12,
+            show_dispersion=4,
+            t_score=4.0,
+            npmi=0.34,
+            left_entropy=1.7,
+            right_entropy=1.8,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=6.5,
+            min_component_information=4.2,
+            high_information_token_count=0,
+            max_show_share=0.36,
+            top2_show_share=0.55,
+        )
+        connection.commit()
+
+    result = CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                cand.candidate_key,
+                score.passes_support_gate,
+                score.passes_quality_gate,
+                score.discard_family,
+                score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            ORDER BY cand.candidate_key
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchall()
+
+    row_by_key = {row["candidate_key"]: row for row in rows}
+
+    assert result.support_pass_candidates == 2
+    assert result.quality_pass_candidates == 1
+    assert result.eligible_candidates == 1
+    assert row_by_key["le match"]["passes_support_gate"] == 1
+    assert row_by_key["le match"]["passes_quality_gate"] == 0
+    assert row_by_key["le match"]["discard_family"] == "show_specificity"
+    assert row_by_key["le match"]["is_eligible"] == 0
+    assert row_by_key["un souvenir"]["passes_support_gate"] == 1
+    assert row_by_key["un souvenir"]["passes_quality_gate"] == 1
+    assert row_by_key["un souvenir"]["discard_family"] is None
+    assert row_by_key["un souvenir"]["is_eligible"] == 1
+
+
+def test_refresh_candidate_scores_applies_specificity_penalty_without_rejecting(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="tu vois",
+            display_text="tu vois",
+            ngram_size=2,
+            raw_frequency=40,
+            episode_dispersion=12,
+            show_dispersion=8,
+            t_score=4.0,
+            npmi=0.8,
+            left_entropy=1.8,
+            right_entropy=1.9,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=6.5,
+            min_component_information=4.2,
+            high_information_token_count=0,
+            max_show_share=0.2,
+            top2_show_share=0.35,
+        )
+        _insert_candidate(
+            connection,
+            candidate_key="le film",
+            display_text="le film",
+            ngram_size=2,
+            raw_frequency=40,
+            episode_dispersion=12,
+            show_dispersion=4,
+            t_score=4.0,
+            npmi=0.8,
+            left_entropy=1.8,
+            right_entropy=1.9,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=6.5,
+            min_component_information=4.2,
+            high_information_token_count=0,
+            max_show_share=0.8,
+            top2_show_share=0.95,
+        )
+        connection.commit()
+
+    result = CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT
+                cand.candidate_key,
+                score.final_score,
+                score.lane_rank
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            ORDER BY cand.candidate_key
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchall()
+
+    row_by_key = {row["candidate_key"]: row for row in rows}
+
+    assert result.support_pass_candidates == 2
+    assert result.quality_pass_candidates == 2
+    assert result.eligible_candidates == 2
+    assert row_by_key["le film"]["final_score"] < row_by_key["tu vois"]["final_score"]
+    assert row_by_key["tu vois"]["lane_rank"] == 1
+    assert row_by_key["le film"]["lane_rank"] == 2
 
 
 def test_refresh_candidate_scores_rejects_high_punctuation_gap_rows(tmp_path) -> None:

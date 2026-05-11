@@ -18,6 +18,9 @@ class _CandidateScoreInput:
     punctuation_gap_occurrence_ratio: float | None
     punctuation_gap_edge_clitic_ratio: float | None
     max_component_information: float | None
+    max_show_share: float | None
+    top2_show_share: float | None
+    show_entropy: float | None
     dominant_parent_share: float | None
     ranking_lane: str
     passes_support_gate: bool

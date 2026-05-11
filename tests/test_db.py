@@ -522,6 +522,7 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert "'support_floor'" in score_table_sql
     assert "'edge_clitic_gap'" in score_table_sql
     assert "'weak_multiword'" in score_table_sql
+    assert "'show_specificity'" in score_table_sql
     assert "is_eligible = 1 OR lane_rank IS NULL" in score_table_sql
     assert "is_eligible = 1 OR final_score IS NULL" in score_table_sql
     assert "is_eligible = 0 OR discard_family IS NULL" in score_table_sql
@@ -1512,6 +1513,125 @@ def test_bootstrap_migrates_candidate_scores_table_from_v15_schema(tmp_path) -> 
     ]
     assert schema_version == SCHEMA_VERSION
     assert foreign_key_issues == []
+
+
+def test_bootstrap_migrates_candidate_scores_discard_family_enum_from_v17_schema(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+                show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                candidate_id,
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion
+            )
+            VALUES (1, '1', 'de', 'de', 1, 25, 6, 1)
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE candidate_scores (
+                inventory_version TEXT NOT NULL,
+                score_version TEXT NOT NULL,
+                candidate_id INTEGER NOT NULL,
+                ranking_lane TEXT NOT NULL CHECK (ranking_lane IN ('1gram', '2gram', '3gram')),
+                passes_support_gate INTEGER NOT NULL CHECK (passes_support_gate IN (0, 1)),
+                passes_quality_gate INTEGER NOT NULL CHECK (passes_quality_gate IN (0, 1)),
+                discard_family TEXT
+                    CHECK (
+                        discard_family IS NULL
+                        OR discard_family IN ('support_floor', 'edge_clitic_gap', 'weak_multiword')
+                    ),
+                is_eligible INTEGER NOT NULL CHECK (is_eligible IN (0, 1)),
+                frequency_score REAL,
+                dispersion_score REAL,
+                association_score REAL,
+                boundary_score REAL,
+                redundancy_penalty REAL,
+                final_score REAL,
+                lane_rank INTEGER CHECK (lane_rank IS NULL OR lane_rank > 0),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (inventory_version, score_version, candidate_id),
+                CHECK (is_eligible = 1 OR lane_rank IS NULL),
+                CHECK (is_eligible = 1 OR final_score IS NULL),
+                CHECK (is_eligible = 0 OR discard_family IS NULL),
+                CHECK (is_eligible = 1 OR discard_family IS NOT NULL),
+                FOREIGN KEY (candidate_id, inventory_version)
+                    REFERENCES token_candidates(candidate_id, inventory_version)
+                    ON DELETE CASCADE
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO candidate_scores (
+                inventory_version,
+                score_version,
+                candidate_id,
+                ranking_lane,
+                passes_support_gate,
+                passes_quality_gate,
+                discard_family,
+                is_eligible
+            )
+            VALUES ('1', 'pilot-v2', 1, '1gram', 0, 0, 'support_floor', 0)
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        score_table_sql = connection.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'table'
+            AND name = 'candidate_scores'
+            """
+        ).fetchone()["sql"]
+        row = connection.execute(
+            """
+            SELECT discard_family
+            FROM candidate_scores
+            WHERE inventory_version = '1'
+            AND score_version = 'pilot-v2'
+            AND candidate_id = 1
+            """
+        ).fetchone()
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+
+    assert "'show_specificity'" in score_table_sql
+    assert row["discard_family"] == "support_floor"
+    assert schema_version == SCHEMA_VERSION
 
 
 def test_step4_columns_default_to_null_for_one_gram_candidates(tmp_path) -> None:
