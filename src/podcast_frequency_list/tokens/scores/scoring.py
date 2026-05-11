@@ -27,6 +27,9 @@ from podcast_frequency_list.tokens.scores.policy import (
     SPECIFICITY_SOFT_MAX_SHOW_SHARE,
     SPECIFICITY_SOFT_SHOW_DISPERSION,
     SPECIFICITY_SOFT_TOP2_SHOW_SHARE,
+    TWO_GRAM_LEXICAL_ASSOCIATION_FLOOR,
+    TWO_GRAM_LEXICAL_ENTROPY_FLOOR,
+    TWO_GRAM_LEXICAL_PARENT_SHARE_CEILING,
 )
 from podcast_frequency_list.tokens.scores.types import _CandidateScoreInput, _CandidateScoreRow
 
@@ -158,7 +161,14 @@ def _evaluate_quality_gate(candidate: _CandidateScoreInput) -> tuple[bool, str |
     )
     passes_lexical_keep = max_component_information >= LEXICAL_KEEP_THRESHOLD
     if passes_lexical_keep and not (passes_association_keep or passes_boundary_keep):
-        passes_lexical_keep = npmi >= LEXICAL_ONLY_ASSOCIATION_FLOOR
+        if candidate.ngram_size == 2:
+            passes_lexical_keep = npmi >= TWO_GRAM_LEXICAL_ASSOCIATION_FLOOR and (
+                min_entropy >= TWO_GRAM_LEXICAL_ENTROPY_FLOOR
+                or candidate.dominant_parent_share is None
+                or candidate.dominant_parent_share < TWO_GRAM_LEXICAL_PARENT_SHARE_CEILING
+            )
+        else:
+            passes_lexical_keep = npmi >= LEXICAL_ONLY_ASSOCIATION_FLOOR
 
     if passes_association_keep or passes_boundary_keep or passes_lexical_keep:
         return True, None

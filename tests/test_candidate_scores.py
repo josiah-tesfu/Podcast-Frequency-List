@@ -1357,6 +1357,87 @@ def test_refresh_candidate_scores_is_deterministic(tmp_path) -> None:
     assert first_rows == second_rows
 
 
+def test_refresh_candidate_scores_rejects_two_gram_lexical_fragments_with_dominant_parent(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        train_de_id = _insert_candidate(
+            connection,
+            candidate_key="train de",
+            display_text="train de",
+            ngram_size=2,
+            raw_frequency=12,
+            episode_dispersion=4,
+            t_score=1.2,
+            npmi=0.28,
+            left_entropy=0.22,
+            right_entropy=0.68,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=6.8,
+            min_component_information=3.5,
+            high_information_token_count=1,
+        )
+        en_train_de_id = _insert_candidate(
+            connection,
+            candidate_key="en train de",
+            display_text="en train de",
+            ngram_size=3,
+            raw_frequency=12,
+            episode_dispersion=4,
+            t_score=2.0,
+            npmi=0.62,
+            left_entropy=1.1,
+            right_entropy=1.2,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=5.2,
+            min_component_information=4.1,
+            high_information_token_count=1,
+        )
+        _insert_containment(
+            connection,
+            smaller_candidate_id=train_de_id,
+            larger_candidate_id=en_train_de_id,
+            shared_occurrence_count=12,
+            shared_episode_count=4,
+        )
+        connection.commit()
+
+    CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                score.passes_support_gate,
+                score.passes_quality_gate,
+                score.discard_family,
+                score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            AND cand.candidate_key = 'train de'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert row["passes_support_gate"] == 1
+    assert row["passes_quality_gate"] == 0
+    assert row["discard_family"] == "weak_multiword"
+    assert row["is_eligible"] == 0
+
+
 def test_refresh_candidate_scores_rejects_unsupported_ngram_sizes(tmp_path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)
