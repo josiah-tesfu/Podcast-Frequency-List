@@ -31,6 +31,9 @@ def _insert_candidate(
     max_component_information: float | None = None,
     min_component_information: float | None = None,
     high_information_token_count: int | None = None,
+    max_show_share: float | None = None,
+    top2_show_share: float | None = None,
+    show_entropy: float | None = None,
 ) -> int:
     if ngram_size >= 2:
         punctuation_gap_occurrence_count = (
@@ -56,6 +59,9 @@ def _insert_candidate(
         high_information_token_count = (
             0 if high_information_token_count is None else high_information_token_count
         )
+        max_show_share = 0.5 if max_show_share is None else max_show_share
+        top2_show_share = 0.8 if top2_show_share is None else top2_show_share
+        show_entropy = 0.9 if show_entropy is None else show_entropy
 
     return int(
         connection.execute(
@@ -78,9 +84,12 @@ def _insert_candidate(
                 punctuation_gap_edge_clitic_ratio,
                 max_component_information,
                 min_component_information,
-                high_information_token_count
+                high_information_token_count,
+                max_show_share,
+                top2_show_share,
+                show_entropy
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 INVENTORY_VERSION,
@@ -101,6 +110,9 @@ def _insert_candidate(
                 max_component_information,
                 min_component_information,
                 high_information_token_count,
+                max_show_share,
+                top2_show_share,
+                show_entropy,
             ),
         ).lastrowid
     )
@@ -1144,6 +1156,9 @@ def test_candidate_scores_list_top_candidates_by_lane(tmp_path) -> None:
     assert top_2gram_rows[0].discard_family is None
     assert top_2gram_rows[0].punctuation_gap_occurrence_count == 1
     assert top_2gram_rows[0].max_component_information == pytest.approx(2.6)
+    assert top_2gram_rows[0].max_show_share == pytest.approx(0.5)
+    assert top_2gram_rows[0].top2_show_share == pytest.approx(0.8)
+    assert top_2gram_rows[0].show_entropy == pytest.approx(0.9)
     assert top_2gram_rows[0].direct_parent_count == 1
     assert top_2gram_rows[0].dominant_parent_key == "je pense que"
     assert top_2gram_rows[0].final_score == pytest.approx(0.9)
@@ -1188,6 +1203,9 @@ def test_candidate_scores_list_candidates_by_key_keeps_order_and_ineligible_rows
     assert en_fait_row.is_eligible == 1
     assert en_fait_row.punctuation_gap_occurrence_count == 1
     assert en_fait_row.high_information_token_count == 1
+    assert en_fait_row.max_show_share == pytest.approx(0.5)
+    assert en_fait_row.top2_show_share == pytest.approx(0.8)
+    assert en_fait_row.show_entropy == pytest.approx(0.9)
     assert en_fait_row.final_score == pytest.approx(0.9)
     assert en_fait_row.lane_rank == 1
 

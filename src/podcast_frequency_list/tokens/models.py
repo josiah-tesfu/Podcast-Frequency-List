@@ -113,6 +113,9 @@ class CandidateSummaryRow:
     max_component_information: float | None = None
     min_component_information: float | None = None
     high_information_token_count: int | None = None
+    max_show_share: float | None = None
+    top2_show_share: float | None = None
+    show_entropy: float | None = None
     covered_by_any_count: int | None = None
     covered_by_any_ratio: float | None = None
     independent_occurrence_count: int | None = None

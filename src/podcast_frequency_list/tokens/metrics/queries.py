@@ -26,6 +26,9 @@ _SUMMARY_COLUMNS_SQL = f"""
     cand.max_component_information,
     cand.min_component_information,
     cand.high_information_token_count,
+    cand.max_show_share,
+    cand.top2_show_share,
+    cand.show_entropy,
     CASE
         WHEN cand.ngram_size < {DEFAULT_MAX_NGRAM_SIZE}
         THEN COALESCE(covered_occurrences.covered_by_any_count, 0)
@@ -251,6 +254,9 @@ def _row_to_summary(row: Row) -> CandidateSummaryRow:
         max_component_information=_row_float(row, "max_component_information"),
         min_component_information=_row_float(row, "min_component_information"),
         high_information_token_count=_row_int(row, "high_information_token_count"),
+        max_show_share=_row_float(row, "max_show_share"),
+        top2_show_share=_row_float(row, "top2_show_share"),
+        show_entropy=_row_float(row, "show_entropy"),
         covered_by_any_count=_row_int(row, "covered_by_any_count"),
         covered_by_any_ratio=_row_float(row, "covered_by_any_ratio"),
         independent_occurrence_count=_row_int(row, "independent_occurrence_count"),

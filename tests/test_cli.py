@@ -429,6 +429,9 @@ class FakeCandidateMetricsService:
                 max_component_information=None if ngram_size == 1 else 1.5 + (0.1 * ngram_size),
                 min_component_information=None if ngram_size == 1 else 0.7 + (0.1 * ngram_size),
                 high_information_token_count=None if ngram_size == 1 else 1,
+                max_show_share=None if ngram_size == 1 else 0.2 * ngram_size,
+                top2_show_share=None if ngram_size == 1 else 0.3 * ngram_size,
+                show_entropy=None if ngram_size == 1 else 0.4 * ngram_size,
                 covered_by_any_count=None if ngram_size == 3 else ngram_size,
                 covered_by_any_ratio=None if ngram_size == 3 else 0.25 * ngram_size,
                 independent_occurrence_count=None if ngram_size == 3 else 9 * ngram_size,
@@ -474,6 +477,9 @@ class FakeCandidateMetricsService:
                     max_component_information=2.1 if len(key.split()) >= 2 else None,
                     min_component_information=0.8 if len(key.split()) >= 2 else None,
                     high_information_token_count=1 if len(key.split()) >= 2 else None,
+                    max_show_share=0.5 if len(key.split()) >= 2 else None,
+                    top2_show_share=0.75 if len(key.split()) >= 2 else None,
+                    show_entropy=0.9 if len(key.split()) >= 2 else None,
                     covered_by_any_count=4 if len(key.split()) < 3 else None,
                     covered_by_any_ratio=0.57 if len(key.split()) < 3 else None,
                     independent_occurrence_count=3 if len(key.split()) < 3 else None,
@@ -559,6 +565,9 @@ class FakeCandidateScoresService:
                 max_component_information=None if ngram_size == 1 else 1.5 + (0.1 * ngram_size),
                 min_component_information=None if ngram_size == 1 else 0.7 + (0.1 * ngram_size),
                 high_information_token_count=None if ngram_size == 1 else 1,
+                max_show_share=None if ngram_size == 1 else 0.2 * ngram_size,
+                top2_show_share=None if ngram_size == 1 else 0.3 * ngram_size,
+                show_entropy=None if ngram_size == 1 else 0.4 * ngram_size,
                 covered_by_any_count=None if ngram_size == 3 else ngram_size,
                 covered_by_any_ratio=None if ngram_size == 3 else 0.25 * ngram_size,
                 independent_occurrence_count=None if ngram_size == 3 else 9 * ngram_size,
@@ -642,6 +651,9 @@ class FakeCandidateScoresService:
                 max_component_information=2.4,
                 min_component_information=0.8,
                 high_information_token_count=1,
+                max_show_share=0.5,
+                top2_show_share=0.75,
+                show_entropy=0.9,
                 covered_by_any_count=40,
                 covered_by_any_ratio=1.0,
                 independent_occurrence_count=0,
@@ -702,6 +714,9 @@ class FakeCandidateScoresService:
                     max_component_information=2.1 if ngram_size >= 2 else None,
                     min_component_information=0.8 if ngram_size >= 2 else None,
                     high_information_token_count=1 if ngram_size >= 2 else None,
+                    max_show_share=0.5 if ngram_size >= 2 else None,
+                    top2_show_share=0.75 if ngram_size >= 2 else None,
+                    show_entropy=0.9 if ngram_size >= 2 else None,
                     covered_by_any_count=4 if ngram_size < 3 else None,
                     covered_by_any_ratio=0.57 if ngram_size < 3 else None,
                     independent_occurrence_count=3 if ngram_size < 3 else None,
@@ -1468,7 +1483,8 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
         "\tpunctuation_gap_occurrence_count=0\tpunctuation_gap_occurrence_ratio=0.1"
         "\tpunctuation_gap_edge_clitic_count=0\tpunctuation_gap_edge_clitic_ratio=0.0"
         "\tmax_component_information=1.7\tmin_component_information=0.8999999999999999"
-        "\thigh_information_token_count=1\tcovered_by_any_count=2"
+        "\thigh_information_token_count=1\tmax_show_share=0.4\ttop2_show_share=0.6"
+        "\tshow_entropy=0.8\tcovered_by_any_count=2"
         "\tcovered_by_any_ratio=0.5\tindependent_occurrence_count=18"
         "\tdirect_parent_count=3\tdominant_parent_key=parent-2"
         "\tdominant_parent_shared_count=4\tdominant_parent_share=0.3"
@@ -1483,7 +1499,8 @@ def test_inspect_candidate_metrics_prints_validation_and_rows(tmp_path, monkeypa
         "\tpunctuation_gap_occurrence_count=1\tpunctuation_gap_occurrence_ratio=0.14"
         "\tpunctuation_gap_edge_clitic_count=0\tpunctuation_gap_edge_clitic_ratio=0.0"
         "\tmax_component_information=2.1\tmin_component_information=0.8"
-        "\thigh_information_token_count=1\tcovered_by_any_count=4"
+        "\thigh_information_token_count=1\tmax_show_share=0.5\ttop2_show_share=0.75"
+        "\tshow_entropy=0.9\tcovered_by_any_count=4"
         "\tcovered_by_any_ratio=0.57\tindependent_occurrence_count=3"
         "\tdirect_parent_count=2\tdominant_parent_key=je en fait"
         "\tdominant_parent_shared_count=3\tdominant_parent_share=0.43"

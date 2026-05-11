@@ -51,6 +51,9 @@ def test_candidate_metrics_service_lists_top_candidates_by_ngram(tmp_path) -> No
             max_component_information=2.4,
             min_component_information=0.7,
             high_information_token_count=1,
+            max_show_share=0.5,
+            top2_show_share=0.8,
+            show_entropy=0.9,
         )
         _insert_candidate(
             connection,
@@ -106,6 +109,9 @@ def test_candidate_metrics_service_lists_top_candidates_by_ngram(tmp_path) -> No
     assert rows[0].max_component_information == pytest.approx(2.4)
     assert rows[0].min_component_information == pytest.approx(0.7)
     assert rows[0].high_information_token_count == 1
+    assert rows[0].max_show_share == pytest.approx(0.5)
+    assert rows[0].top2_show_share == pytest.approx(0.8)
+    assert rows[0].show_entropy == pytest.approx(0.9)
     assert rows[0].covered_by_any_count == 0
     assert rows[0].covered_by_any_ratio == pytest.approx(0.0)
     assert rows[0].independent_occurrence_count == 10
@@ -444,6 +450,9 @@ def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tm
             max_component_information=2.1,
             min_component_information=0.9,
             high_information_token_count=1,
+            max_show_share=0.25,
+            top2_show_share=0.5,
+            show_entropy=0.95,
         )
         connection.commit()
 
@@ -467,6 +476,9 @@ def test_candidate_metrics_service_lists_candidates_by_key_in_requested_order(tm
     assert rows[0].max_component_information == pytest.approx(2.1)
     assert rows[0].min_component_information == pytest.approx(0.9)
     assert rows[0].high_information_token_count == 1
+    assert rows[0].max_show_share == pytest.approx(0.25)
+    assert rows[0].top2_show_share == pytest.approx(0.5)
+    assert rows[0].show_entropy == pytest.approx(0.95)
     assert rows[0].covered_by_any_count is None
     assert rows[0].covered_by_any_ratio is None
     assert rows[0].independent_occurrence_count is None

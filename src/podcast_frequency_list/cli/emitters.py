@@ -209,6 +209,18 @@ def emit_candidate_rows(
                         "high_information_token_count",
                         _optional_metric_value(row.high_information_token_count),
                     ),
+                    (
+                        "max_show_share",
+                        _optional_metric_value(row.max_show_share),
+                    ),
+                    (
+                        "top2_show_share",
+                        _optional_metric_value(row.top2_show_share),
+                    ),
+                    (
+                        "show_entropy",
+                        _optional_metric_value(row.show_entropy),
+                    ),
                 ]
             )
         if include_step5:
