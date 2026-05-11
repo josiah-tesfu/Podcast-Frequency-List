@@ -369,6 +369,7 @@ CREATE TABLE IF NOT EXISTS candidate_scores (
                 'support_floor',
                 'edge_clitic_gap',
                 'weak_multiword',
+                'weak_unigram',
                 'show_specificity',
                 'parent_fragment',
                 'open_edge_fragment'

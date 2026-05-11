@@ -14,17 +14,27 @@ from podcast_frequency_list.tokens.scores.policy import (
     DISCARD_FAMILY_SHOW_SPECIFICITY,
     DISCARD_FAMILY_SUPPORT,
     DISCARD_FAMILY_WEAK_MULTIWORD,
+    DISCARD_FAMILY_WEAK_UNIGRAM,
     LEXICAL_KEEP_THRESHOLD,
     LEXICAL_ONLY_ASSOCIATION_FLOOR,
+    ONE_GRAM_HARD_MAX_SHOW_SHARE,
+    ONE_GRAM_HARD_SHOW_DISPERSION,
     ONE_GRAM_SPECIFICITY_MAX_PENALTY,
     ONE_GRAM_SPECIFICITY_MAX_SHOW_SHARE,
     ONE_GRAM_SPECIFICITY_SHOW_DISPERSION,
+    ONE_GRAM_WEAK_EPISODE_DISPERSION,
+    ONE_GRAM_WEAK_MAX_SHOW_SHARE,
+    ONE_GRAM_WEAK_RAW_FREQUENCY,
+    ONE_GRAM_WEAK_SHOW_DISPERSION,
     OPEN_EDGE_FRAGMENT_MAX_ENTROPY,
     OPEN_EDGE_FRAGMENT_MAX_NPMI,
     OPEN_EDGE_FRAGMENT_MIN_PARENT_SHARE,
+    OPEN_EDGE_TWO_GRAM_MAX_ENTROPY,
+    OPEN_EDGE_TWO_GRAM_MAX_NPMI,
     PARENT_FRAGMENT_MAX_ENTROPY,
     PARENT_FRAGMENT_MAX_NPMI,
     PARENT_FRAGMENT_MIN_PARENT_SHARE,
+    PARENT_FRAGMENT_STRICT_ENTROPY,
     PUNCTUATION_GAP_REJECT_THRESHOLD,
     REDUNDANCY_THRESHOLD,
     SPECIFICITY_HARD_MAX_SHOW_SHARE,
@@ -38,6 +48,11 @@ from podcast_frequency_list.tokens.scores.policy import (
     TWO_GRAM_LEXICAL_ASSOCIATION_FLOOR,
     TWO_GRAM_LEXICAL_ENTROPY_FLOOR,
     TWO_GRAM_LEXICAL_PARENT_SHARE_CEILING,
+    TWO_GRAM_PARENT_FRAGMENT_MAX_ENTROPY,
+    TWO_GRAM_PARENT_FRAGMENT_MAX_NPMI,
+    TWO_GRAM_PARENT_FRAGMENT_MIN_PARENT_SHARE,
+    WEAK_PUNCTUATION_GAP_MAX_NPMI,
+    WEAK_PUNCTUATION_GAP_REJECT_THRESHOLD,
 )
 from podcast_frequency_list.tokens.scores.types import _CandidateScoreInput, _CandidateScoreRow
 
@@ -147,6 +162,10 @@ def _evaluate_quality_gate(candidate: _CandidateScoreInput) -> tuple[bool, str |
         return False, None
 
     if candidate.ngram_size == 1:
+        if _is_hard_one_gram_show_specificity_reject(candidate):
+            return False, DISCARD_FAMILY_SHOW_SPECIFICITY
+        if _is_weak_one_gram(candidate):
+            return False, DISCARD_FAMILY_WEAK_UNIGRAM
         return True, None
 
     if (candidate.punctuation_gap_edge_clitic_ratio or 0.0) > 0.0:
@@ -157,6 +176,9 @@ def _evaluate_quality_gate(candidate: _CandidateScoreInput) -> tuple[bool, str |
 
     npmi = float(candidate.npmi)
     min_entropy = min(float(candidate.left_entropy), float(candidate.right_entropy))
+    if _is_weak_punctuation_gap_fragment(candidate, npmi=npmi):
+        return False, DISCARD_FAMILY_WEAK_MULTIWORD
+
     if _is_open_edge_fragment(
         candidate,
         npmi=npmi,
@@ -386,6 +408,8 @@ def _is_open_edge_fragment(
     has_open_edge = bool(candidate.starts_with_standalone_clitic) or bool(
         candidate.ends_with_standalone_clitic
     )
+    if candidate.ngram_size == 2 and has_open_edge:
+        return npmi < OPEN_EDGE_TWO_GRAM_MAX_NPMI and min_entropy < OPEN_EDGE_TWO_GRAM_MAX_ENTROPY
     return (
         has_open_edge
         and candidate.dominant_parent_share is not None
@@ -395,17 +419,59 @@ def _is_open_edge_fragment(
     )
 
 
+def _is_weak_punctuation_gap_fragment(
+    candidate: _CandidateScoreInput,
+    *,
+    npmi: float,
+) -> bool:
+    return (
+        candidate.ngram_size == 2
+        and candidate.punctuation_gap_occurrence_ratio >= WEAK_PUNCTUATION_GAP_REJECT_THRESHOLD
+        and npmi < WEAK_PUNCTUATION_GAP_MAX_NPMI
+    )
+
+
 def _is_parent_fragment(
     candidate: _CandidateScoreInput,
     *,
     npmi: float,
     min_entropy: float,
 ) -> bool:
+    if candidate.dominant_parent_share is None:
+        return False
+    if (
+        candidate.ngram_size == 2
+        and candidate.dominant_parent_share >= TWO_GRAM_PARENT_FRAGMENT_MIN_PARENT_SHARE
+        and min_entropy < TWO_GRAM_PARENT_FRAGMENT_MAX_ENTROPY
+        and npmi < TWO_GRAM_PARENT_FRAGMENT_MAX_NPMI
+    ):
+        return True
+    if candidate.dominant_parent_share < PARENT_FRAGMENT_MIN_PARENT_SHARE:
+        return False
+    if candidate.ngram_size == 2 and min_entropy < PARENT_FRAGMENT_STRICT_ENTROPY:
+        return True
     return (
-        candidate.dominant_parent_share is not None
-        and candidate.dominant_parent_share >= PARENT_FRAGMENT_MIN_PARENT_SHARE
-        and min_entropy < PARENT_FRAGMENT_MAX_ENTROPY
+        min_entropy < PARENT_FRAGMENT_MAX_ENTROPY
         and npmi < PARENT_FRAGMENT_MAX_NPMI
+    )
+
+
+def _is_hard_one_gram_show_specificity_reject(candidate: _CandidateScoreInput) -> bool:
+    return (
+        candidate.ngram_size == 1
+        and candidate.show_dispersion <= ONE_GRAM_HARD_SHOW_DISPERSION
+        and float(candidate.max_show_share or 0.0) >= ONE_GRAM_HARD_MAX_SHOW_SHARE
+    )
+
+
+def _is_weak_one_gram(candidate: _CandidateScoreInput) -> bool:
+    return (
+        candidate.ngram_size == 1
+        and candidate.max_show_share is not None
+        and candidate.raw_frequency <= ONE_GRAM_WEAK_RAW_FREQUENCY
+        and candidate.episode_dispersion <= ONE_GRAM_WEAK_EPISODE_DISPERSION
+        and candidate.show_dispersion <= ONE_GRAM_WEAK_SHOW_DISPERSION
+        and candidate.max_show_share >= ONE_GRAM_WEAK_MAX_SHOW_SHARE
     )
 
 

@@ -528,6 +528,7 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert "'support_floor'" in score_table_sql
     assert "'edge_clitic_gap'" in score_table_sql
     assert "'weak_multiword'" in score_table_sql
+    assert "'weak_unigram'" in score_table_sql
     assert "'show_specificity'" in score_table_sql
     assert "'parent_fragment'" in score_table_sql
     assert "'open_edge_fragment'" in score_table_sql
@@ -1799,6 +1800,7 @@ def test_bootstrap_migrates_candidate_scores_discard_family_enum_from_v17_schema
         ).fetchone()[0]
 
     assert "'show_specificity'" in score_table_sql
+    assert "'weak_unigram'" in score_table_sql
     assert "'parent_fragment'" in score_table_sql
     assert "'open_edge_fragment'" in score_table_sql
     assert row["discard_family"] == "support_floor"

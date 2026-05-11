@@ -1531,6 +1531,325 @@ def test_refresh_candidate_scores_rejects_open_edge_fragments(tmp_path) -> None:
     assert row["is_eligible"] == 0
 
 
+def test_refresh_candidate_scores_rejects_show_specific_one_grams(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="match",
+            display_text="match",
+            ngram_size=1,
+            raw_frequency=64,
+            episode_dispersion=7,
+            show_dispersion=5,
+            max_show_share=0.922,
+        )
+        connection.commit()
+
+    result = CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                score.passes_support_gate,
+                score.passes_quality_gate,
+                score.discard_family,
+                score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            AND cand.candidate_key = 'match'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert result.support_pass_candidates == 1
+    assert result.quality_pass_candidates == 0
+    assert result.eligible_candidates == 0
+    assert row["passes_support_gate"] == 1
+    assert row["passes_quality_gate"] == 0
+    assert row["discard_family"] == "show_specificity"
+    assert row["is_eligible"] == 0
+
+
+def test_refresh_candidate_scores_rejects_weak_one_grams(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="studio",
+            display_text="studio",
+            ngram_size=1,
+            raw_frequency=20,
+            episode_dispersion=11,
+            show_dispersion=7,
+            max_show_share=0.4,
+        )
+        connection.commit()
+
+    result = CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                score.passes_support_gate,
+                score.passes_quality_gate,
+                score.discard_family,
+                score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            AND cand.candidate_key = 'studio'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert result.support_pass_candidates == 1
+    assert result.quality_pass_candidates == 0
+    assert result.eligible_candidates == 0
+    assert row["passes_support_gate"] == 1
+    assert row["passes_quality_gate"] == 0
+    assert row["discard_family"] == "weak_unigram"
+    assert row["is_eligible"] == 0
+
+
+def test_refresh_candidate_scores_rejects_broader_weak_one_grams(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="pression",
+            display_text="pression",
+            ngram_size=1,
+            raw_frequency=30,
+            episode_dispersion=14,
+            show_dispersion=9,
+            max_show_share=0.367,
+        )
+        connection.commit()
+
+    CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT score.discard_family, score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+              AND score.score_version = ?
+              AND cand.candidate_key = 'pression'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert row["discard_family"] == "weak_unigram"
+    assert row["is_eligible"] == 0
+
+
+def test_refresh_candidate_scores_rejects_weak_punctuation_gap_two_grams(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="apres si",
+            display_text="Après, si",
+            ngram_size=2,
+            raw_frequency=10,
+            episode_dispersion=9,
+            show_dispersion=5,
+            t_score=1.2,
+            npmi=0.132,
+            left_entropy=1.748,
+            right_entropy=2.301,
+            punctuation_gap_occurrence_count=7,
+            punctuation_gap_occurrence_ratio=0.70,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            starts_with_standalone_clitic=0,
+            ends_with_standalone_clitic=0,
+            max_component_information=6.3,
+            min_component_information=3.2,
+            high_information_token_count=1,
+            max_show_share=0.2,
+            top2_show_share=0.4,
+        )
+        connection.commit()
+
+    CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT score.discard_family, score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+              AND score.score_version = ?
+              AND cand.candidate_key = 'apres si'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert row["discard_family"] == "weak_multiword"
+    assert row["is_eligible"] == 0
+
+
+def test_refresh_candidate_scores_rejects_open_edge_two_grams_without_parent(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="tu n",
+            display_text="tu n",
+            ngram_size=2,
+            raw_frequency=94,
+            episode_dispersion=44,
+            show_dispersion=10,
+            t_score=3.4,
+            npmi=0.123,
+            left_entropy=1.529,
+            right_entropy=2.011,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            starts_with_standalone_clitic=0,
+            ends_with_standalone_clitic=1,
+            max_component_information=6.2,
+            min_component_information=0.4,
+            high_information_token_count=1,
+            max_show_share=0.18,
+            top2_show_share=0.33,
+        )
+        connection.commit()
+
+    CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT score.discard_family, score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+              AND score.score_version = ?
+              AND cand.candidate_key = 'tu n'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert row["discard_family"] == "open_edge_fragment"
+    assert row["is_eligible"] == 0
+
+
+def test_refresh_candidate_scores_rejects_high_npmi_parent_fragments_with_zero_boundary(
+    tmp_path,
+) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        votre_courrier_id = _insert_candidate(
+            connection,
+            candidate_key="votre courrier",
+            display_text="votre courrier",
+            ngram_size=2,
+            raw_frequency=12,
+            episode_dispersion=5,
+            t_score=1.7,
+            npmi=0.76,
+            left_entropy=0.0,
+            right_entropy=0.0,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            starts_with_standalone_clitic=0,
+            ends_with_standalone_clitic=0,
+            max_component_information=6.7,
+            min_component_information=4.1,
+            high_information_token_count=1,
+        )
+        verifiez_votre_courrier_id = _insert_candidate(
+            connection,
+            candidate_key="verifiez votre courrier",
+            display_text="Vérifiez votre courrier",
+            ngram_size=3,
+            raw_frequency=12,
+            episode_dispersion=5,
+            t_score=2.0,
+            npmi=0.9,
+            left_entropy=1.1,
+            right_entropy=1.2,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=5.4,
+            min_component_information=4.0,
+            high_information_token_count=1,
+        )
+        _insert_containment(
+            connection,
+            smaller_candidate_id=votre_courrier_id,
+            larger_candidate_id=verifiez_votre_courrier_id,
+            shared_occurrence_count=12,
+            shared_episode_count=5,
+        )
+        connection.commit()
+
+    CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                score.passes_support_gate,
+                score.passes_quality_gate,
+                score.discard_family,
+                score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            AND cand.candidate_key = 'votre courrier'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert row["passes_support_gate"] == 1
+    assert row["passes_quality_gate"] == 0
+    assert row["discard_family"] == "parent_fragment"
+    assert row["is_eligible"] == 0
+
+
 def test_refresh_candidate_scores_rejects_unsupported_ngram_sizes(tmp_path) -> None:
     db_path = tmp_path / "test.db"
     bootstrap_database(db_path)

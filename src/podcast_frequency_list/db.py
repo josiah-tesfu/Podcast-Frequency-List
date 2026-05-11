@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "20"
+SCHEMA_VERSION = "21"
 
 
 def get_schema_path() -> Path:
@@ -428,6 +428,7 @@ def migrate_candidate_scores_schema(connection: sqlite3.Connection) -> None:
         <= columns
         and "discard_family IS NOT NULL" in table_sql
         and "'show_specificity'" in table_sql
+        and "'weak_unigram'" in table_sql
         and "'parent_fragment'" in table_sql
         and "'open_edge_fragment'" in table_sql
     ):
@@ -450,6 +451,7 @@ def migrate_candidate_scores_schema(connection: sqlite3.Connection) -> None:
                         'support_floor',
                         'edge_clitic_gap',
                         'weak_multiword',
+                        'weak_unigram',
                         'show_specificity',
                         'parent_fragment',
                         'open_edge_fragment'
