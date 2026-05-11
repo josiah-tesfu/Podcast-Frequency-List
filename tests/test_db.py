@@ -427,6 +427,9 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
         "max_component_information",
         "min_component_information",
         "high_information_token_count",
+        "max_show_share",
+        "top2_show_share",
+        "show_entropy",
     } <= candidate_columns.keys()
     assert {
         "inventory_version",
@@ -483,6 +486,12 @@ def test_bootstrap_creates_candidate_inventory_tables_and_indexes(tmp_path) -> N
     assert candidate_columns["min_component_information"]["dflt_value"] is None
     assert candidate_columns["high_information_token_count"]["notnull"] == 0
     assert candidate_columns["high_information_token_count"]["dflt_value"] is None
+    assert candidate_columns["max_show_share"]["notnull"] == 0
+    assert candidate_columns["max_show_share"]["dflt_value"] is None
+    assert candidate_columns["top2_show_share"]["notnull"] == 0
+    assert candidate_columns["top2_show_share"]["dflt_value"] is None
+    assert candidate_columns["show_entropy"]["notnull"] == 0
+    assert candidate_columns["show_entropy"]["dflt_value"] is None
     assert containment_columns["inventory_version"]["notnull"] == 1
     assert containment_columns["smaller_candidate_id"]["notnull"] == 1
     assert containment_columns["larger_candidate_id"]["notnull"] == 1
@@ -905,6 +914,170 @@ def test_bootstrap_migrates_followup_b_columns_from_v14_schema(tmp_path) -> None
     assert row["max_component_information"] is None
     assert row["min_component_information"] is None
     assert row["high_information_token_count"] is None
+    assert schema_version == SCHEMA_VERSION
+    assert foreign_key_issues == []
+
+
+def test_bootstrap_migrates_specificity_columns_from_v16_schema(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE token_candidates (
+                candidate_id INTEGER PRIMARY KEY,
+                inventory_version TEXT NOT NULL,
+                candidate_key TEXT NOT NULL,
+                display_text TEXT NOT NULL,
+                ngram_size INTEGER NOT NULL CHECK (ngram_size BETWEEN 1 AND 4),
+                raw_frequency INTEGER NOT NULL DEFAULT 0 CHECK (raw_frequency >= 0),
+                episode_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (episode_dispersion >= 0),
+                show_dispersion INTEGER NOT NULL DEFAULT 0 CHECK (show_dispersion >= 0),
+                t_score REAL,
+                npmi REAL,
+                left_context_type_count INTEGER
+                    CHECK (left_context_type_count IS NULL OR left_context_type_count >= 0),
+                right_context_type_count INTEGER
+                    CHECK (right_context_type_count IS NULL OR right_context_type_count >= 0),
+                left_entropy REAL
+                    CHECK (left_entropy IS NULL OR left_entropy >= 0),
+                right_entropy REAL
+                    CHECK (right_entropy IS NULL OR right_entropy >= 0),
+                punctuation_gap_occurrence_count INTEGER
+                    CHECK (
+                        punctuation_gap_occurrence_count IS NULL
+                        OR punctuation_gap_occurrence_count >= 0
+                    ),
+                punctuation_gap_occurrence_ratio REAL
+                    CHECK (
+                        punctuation_gap_occurrence_ratio IS NULL
+                        OR (
+                            punctuation_gap_occurrence_ratio >= 0
+                            AND punctuation_gap_occurrence_ratio <= 1
+                        )
+                    ),
+                punctuation_gap_edge_clitic_count INTEGER
+                    CHECK (
+                        punctuation_gap_edge_clitic_count IS NULL
+                        OR punctuation_gap_edge_clitic_count >= 0
+                    ),
+                punctuation_gap_edge_clitic_ratio REAL
+                    CHECK (
+                        punctuation_gap_edge_clitic_ratio IS NULL
+                        OR (
+                            punctuation_gap_edge_clitic_ratio >= 0
+                            AND punctuation_gap_edge_clitic_ratio <= 1
+                        )
+                    ),
+                max_component_information REAL
+                    CHECK (
+                        max_component_information IS NULL
+                        OR max_component_information >= 0
+                    ),
+                min_component_information REAL
+                    CHECK (
+                        min_component_information IS NULL
+                        OR min_component_information >= 0
+                    ),
+                high_information_token_count INTEGER
+                    CHECK (
+                        high_information_token_count IS NULL
+                        OR high_information_token_count >= 0
+                    ),
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE (inventory_version, candidate_key),
+                UNIQUE (candidate_id, inventory_version)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO token_candidates (
+                inventory_version,
+                candidate_key,
+                display_text,
+                ngram_size,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                t_score,
+                npmi,
+                left_context_type_count,
+                right_context_type_count,
+                left_entropy,
+                right_entropy,
+                punctuation_gap_occurrence_count,
+                punctuation_gap_occurrence_ratio,
+                punctuation_gap_edge_clitic_count,
+                punctuation_gap_edge_clitic_ratio,
+                max_component_information,
+                min_component_information,
+                high_information_token_count
+            )
+            VALUES (
+                '1',
+                'en fait',
+                'en fait',
+                2,
+                7,
+                3,
+                2,
+                1.5,
+                0.4,
+                2,
+                2,
+                0.2,
+                0.3,
+                1,
+                0.2,
+                0,
+                0.0,
+                1.7,
+                1.3,
+                1
+            )
+            """
+        )
+        connection.commit()
+
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        candidate_columns = {
+            row["name"]: row
+            for row in connection.execute("PRAGMA table_info(token_candidates)").fetchall()
+        }
+        row = connection.execute(
+            """
+            SELECT
+                candidate_key,
+                raw_frequency,
+                episode_dispersion,
+                show_dispersion,
+                max_show_share,
+                top2_show_share,
+                show_entropy
+            FROM token_candidates
+            WHERE candidate_key = 'en fait'
+            """
+        ).fetchone()
+        schema_version = connection.execute(
+            "SELECT value FROM app_meta WHERE key = 'schema_version'"
+        ).fetchone()[0]
+        foreign_key_issues = connection.execute("PRAGMA foreign_key_check").fetchall()
+
+    assert {
+        "max_show_share",
+        "top2_show_share",
+        "show_entropy",
+    } <= candidate_columns.keys()
+    assert row["raw_frequency"] == 7
+    assert row["episode_dispersion"] == 3
+    assert row["show_dispersion"] == 2
+    assert row["max_show_share"] is None
+    assert row["top2_show_share"] is None
+    assert row["show_entropy"] is None
     assert schema_version == SCHEMA_VERSION
     assert foreign_key_issues == []
 

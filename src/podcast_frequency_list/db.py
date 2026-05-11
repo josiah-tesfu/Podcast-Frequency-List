@@ -5,7 +5,7 @@ from pathlib import Path
 
 from podcast_frequency_list.config import load_settings
 
-SCHEMA_VERSION = "16"
+SCHEMA_VERSION = "17"
 
 
 def get_schema_path() -> Path:
@@ -253,6 +253,39 @@ _TOKEN_CANDIDATE_MIGRATIONS = (
         CHECK (
             high_information_token_count IS NULL
             OR high_information_token_count >= 0
+        )
+        """,
+    ),
+    (
+        "max_show_share",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN max_show_share REAL
+        CHECK (
+            max_show_share IS NULL
+            OR (max_show_share >= 0 AND max_show_share <= 1)
+        )
+        """,
+    ),
+    (
+        "top2_show_share",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN top2_show_share REAL
+        CHECK (
+            top2_show_share IS NULL
+            OR (top2_show_share >= 0 AND top2_show_share <= 1)
+        )
+        """,
+    ),
+    (
+        "show_entropy",
+        """
+        ALTER TABLE token_candidates
+        ADD COLUMN show_entropy REAL
+        CHECK (
+            show_entropy IS NULL
+            OR (show_entropy >= 0 AND show_entropy <= 1)
         )
         """,
     ),

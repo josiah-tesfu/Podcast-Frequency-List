@@ -108,6 +108,9 @@ def _insert_candidate(
     max_component_information: float | None = None,
     min_component_information: float | None = None,
     high_information_token_count: int | None = None,
+    max_show_share: float | None = None,
+    top2_show_share: float | None = None,
+    show_entropy: float | None = None,
 ) -> int:
     return int(
         connection.execute(
@@ -132,9 +135,12 @@ def _insert_candidate(
                 punctuation_gap_edge_clitic_ratio,
                 max_component_information,
                 min_component_information,
-                high_information_token_count
+                high_information_token_count,
+                max_show_share,
+                top2_show_share,
+                show_entropy
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 inventory_version,
@@ -157,6 +163,9 @@ def _insert_candidate(
                 max_component_information,
                 min_component_information,
                 high_information_token_count,
+                max_show_share,
+                top2_show_share,
+                show_entropy,
             ),
         ).lastrowid
     )

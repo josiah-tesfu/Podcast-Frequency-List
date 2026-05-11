@@ -251,6 +251,21 @@ CREATE TABLE IF NOT EXISTS token_candidates (
             high_information_token_count IS NULL
             OR high_information_token_count >= 0
         ),
+    max_show_share REAL
+        CHECK (
+            max_show_share IS NULL
+            OR (max_show_share >= 0 AND max_show_share <= 1)
+        ),
+    top2_show_share REAL
+        CHECK (
+            top2_show_share IS NULL
+            OR (top2_show_share >= 0 AND top2_show_share <= 1)
+        ),
+    show_entropy REAL
+        CHECK (
+            show_entropy IS NULL
+            OR (show_entropy >= 0 AND show_entropy <= 1)
+        ),
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (inventory_version, candidate_key),
