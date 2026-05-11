@@ -23,6 +23,7 @@ from podcast_frequency_list.tokens.scores.policy import (
     SPECIFICITY_HARD_SHOW_DISPERSION,
     SPECIFICITY_HARD_TOP2_SHOW_SHARE,
     SPECIFICITY_MAX_PENALTY,
+    SPECIFICITY_SINGLE_SHOW_REJECT_DISPERSION,
     SPECIFICITY_SOFT_MAX_SHOW_SHARE,
     SPECIFICITY_SOFT_SHOW_DISPERSION,
     SPECIFICITY_SOFT_TOP2_SHOW_SHARE,
@@ -331,6 +332,8 @@ def _is_hard_show_specificity_reject(
 ) -> bool:
     if candidate.ngram_size == 1:
         return False
+    if candidate.show_dispersion <= SPECIFICITY_SINGLE_SHOW_REJECT_DISPERSION:
+        return True
     if candidate.show_dispersion > SPECIFICITY_HARD_SHOW_DISPERSION:
         return False
     if float(candidate.max_show_share or 0.0) < SPECIFICITY_HARD_MAX_SHOW_SHARE:

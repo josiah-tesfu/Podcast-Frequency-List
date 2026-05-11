@@ -759,7 +759,7 @@ def test_refresh_candidate_scores_support_gate_ignores_show_dispersion(tmp_path)
             ngram_size=2,
             raw_frequency=40,
             episode_dispersion=12,
-            show_dispersion=1,
+            show_dispersion=2,
             t_score=4.0,
             npmi=0.8,
             left_entropy=1.0,
@@ -932,6 +932,65 @@ def test_refresh_candidate_scores_assigns_show_specificity_discard_family(tmp_pa
     assert row_by_key["un souvenir"]["passes_quality_gate"] == 1
     assert row_by_key["un souvenir"]["discard_family"] is None
     assert row_by_key["un souvenir"]["is_eligible"] == 1
+
+
+def test_refresh_candidate_scores_rejects_single_show_multiword_candidates(tmp_path) -> None:
+    db_path = tmp_path / "test.db"
+    bootstrap_database(db_path)
+
+    with connect(db_path) as connection:
+        _insert_candidate(
+            connection,
+            candidate_key="small talk",
+            display_text="Small Talk",
+            ngram_size=2,
+            raw_frequency=10,
+            episode_dispersion=4,
+            show_dispersion=1,
+            t_score=6.0,
+            npmi=0.98,
+            left_entropy=2.2,
+            right_entropy=2.1,
+            punctuation_gap_occurrence_count=0,
+            punctuation_gap_occurrence_ratio=0.0,
+            punctuation_gap_edge_clitic_count=0,
+            punctuation_gap_edge_clitic_ratio=0.0,
+            max_component_information=8.0,
+            min_component_information=5.0,
+            high_information_token_count=1,
+            max_show_share=1.0,
+            top2_show_share=1.0,
+        )
+        connection.commit()
+
+    result = CandidateScoresService(db_path=db_path).refresh()
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """
+            SELECT
+                score.passes_support_gate,
+                score.passes_quality_gate,
+                score.discard_family,
+                score.is_eligible
+            FROM candidate_scores score
+            JOIN token_candidates cand
+              ON cand.candidate_id = score.candidate_id
+             AND cand.inventory_version = score.inventory_version
+            WHERE score.inventory_version = ?
+            AND score.score_version = ?
+            AND cand.candidate_key = 'small talk'
+            """,
+            (INVENTORY_VERSION, SCORE_VERSION),
+        ).fetchone()
+
+    assert result.support_pass_candidates == 1
+    assert result.quality_pass_candidates == 0
+    assert result.eligible_candidates == 0
+    assert row["passes_support_gate"] == 1
+    assert row["passes_quality_gate"] == 0
+    assert row["discard_family"] == "show_specificity"
+    assert row["is_eligible"] == 0
 
 
 def test_refresh_candidate_scores_applies_specificity_penalty_without_rejecting(tmp_path) -> None:
